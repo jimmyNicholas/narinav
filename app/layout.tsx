@@ -36,7 +36,7 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <div className="max-w-8xl mx-auto px-6 py-4" style={narinavThemeVars}>
+        <div className="narinav-theme max-w-8xl mx-auto px-6 py-4" style={narinavThemeVars}>
           <div className="rounded-[40px] bg-themed ring-1 ring-black/5 p-3 sm:p-4">
             <main
               className="rounded-[32px] bg-white ring-1 ring-black/10 shadow-sm p-4 sm:p-5 space-y-4"

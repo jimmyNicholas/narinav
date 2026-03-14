@@ -29,10 +29,10 @@ export function getStoryBuddyViewState({
   payload,
   choicesState,
 }: UseStoryBuddyViewStateInput): StoryBuddyViewState {
-  const storySoFar = storySoFarState.trimEnd();
-  const messageToPlayer = resolveMessageToPlayer(messageToPlayerState);
-  const finalTitle = finalTitleState.trim();
-  const finalStory = finalStoryState
+  const storySoFar = String(storySoFarState ?? "").trimEnd();
+  const messageToPlayer = resolveMessageToPlayer(String(messageToPlayerState ?? ""));
+  const finalTitle = String(finalTitleState ?? "").trim();
+  const finalStory = String(finalStoryState ?? "")
     .replace(/\\\\n/g, "\n")
     .replace(/\\n/g, "\n")
     .trim();

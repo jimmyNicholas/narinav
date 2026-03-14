@@ -3,18 +3,46 @@ import type { StoryPayload } from "@/reference/storyBuddyUtils";
 
 const ANTHROPIC_VERSION = "2023-06-01";
 
-const SYSTEM_PROMPT = `You are Story Buddy, a collaborative story-building assistant. You co-write a short story with the user through five stages: Exposition → Rising Action → Climax → Falling Action → Resolution.
+/** Keep last N chars of story context to limit input tokens (and cost) on long games. */
+const MAX_STORY_CONTEXT_CHARS = 3000;
 
-You must respond with a single JSON object only (no markdown, no code fence, no other text). The object must have these keys:
-- story_so_far: string — the full story text so far, one paragraph per line.
-- message_to_player: string — what you say to the player this turn (one or two sentences).
-- choices: string[] — exactly 3 options for what happens next (short phrases).
-- allow_custom_input: boolean — true so the player can type their own option.
-When the story is finished (Resolution done), also include:
-- final_title: string — a title for the story.
-- final_story: string — the complete polished story.
+const SYSTEM_PROMPT_BASE = `You are Story Buddy. Co-write a short story with the user (Exposition → Rising Action → Climax → Falling Action → Resolution).
 
-If this is the first turn (action is "start"), begin the story with a brief exposition and offer 3 choices. Always return valid JSON.`;
+Respond with a single JSON object only (no markdown). Keys:
+- story_so_far: string[] (full story so far as an ordered list of short beats; each element is one or two short sentences with no embedded newlines)
+- message_to_player: string (one or two sentences)
+- choices: string[] (exactly 3 short options; when ending, use either empty [] or a single choice like "The End")
+- allow_custom_input: boolean (true)
+When finished add: final_title, final_story (complete story).
+
+After the climax, move into a brief resolution (one or two beats). Do not introduce new plot threads or a new adventure after the climax.
+As soon as the resolution is told, the agent MUST set final_title and final_story (the full story including the resolution) and stop offering new branches: use either empty choices or a single choice labeled something like "The End". No further choices after that.
+Never add new plot threads after the resolution. One resolution, then end.
+
+First turn: brief exposition + 3 choices. Always valid JSON.`;
+
+function buildSystemPrompt(opts: {
+  shortSentencesOnly?: boolean;
+  shortSentenceMinWords?: number;
+  shortSentenceMaxWords?: number;
+  usePlayerWordsWhenPossible?: boolean;
+}): string {
+  let prompt = SYSTEM_PROMPT_BASE;
+  if (opts.shortSentencesOnly) {
+    const minRaw = opts.shortSentenceMinWords ?? 8;
+    const maxRaw = opts.shortSentenceMaxWords ?? 18;
+    const minWords = Math.max(5, Math.min(25, Math.round(minRaw)));
+    const maxWords = Math.max(5, Math.min(25, Math.round(maxRaw)));
+    const finalMin = Math.min(minWords, maxWords);
+    const finalMax = Math.max(minWords, maxWords);
+    prompt += `\n\nSentences must be between ${finalMin} and ${finalMax} words`;
+  }
+  if (opts.usePlayerWordsWhenPossible) {
+    prompt +=
+      "\n\nWhen the player chooses an option or types their own action, reflect their words in the story when possible (within safety and coherence).";
+  }
+  return prompt;
+}
 
 function extractJson(text: string): string {
   const trimmed = text.trim();
@@ -48,7 +76,18 @@ export async function POST(request: Request) {
     );
   }
 
-  let body: { action: string; choice?: string; storySoFar?: string; messageToPlayer?: string };
+  let body: {
+    action: string;
+    choice?: string;
+    storySoFar?: string;
+    messageToPlayer?: string;
+    options?: {
+      shortSentencesOnly?: boolean;
+      shortSentenceMinWords?: number;
+      shortSentenceMaxWords?: number;
+      usePlayerWordsWhenPossible?: boolean;
+    };
+  };
   try {
     body = await request.json();
   } catch {
@@ -59,10 +98,19 @@ export async function POST(request: Request) {
   }
 
   const action = body.action === "choice" ? "choice" : "start";
+  const storySoFar = (body.storySoFar ?? "").slice(-MAX_STORY_CONTEXT_CHARS);
   const userContent =
     action === "start"
       ? "Start the story. Return only the JSON object for the first turn."
-      : `The player chose: "${body.choice ?? ""}". Current story_so_far:\n${body.storySoFar ?? ""}\n\nCurrent message_to_player was: ${body.messageToPlayer ?? ""}\n\nReturn the next turn as a single JSON object only.`;
+      : `The player chose: "${body.choice ?? ""}". Current story_so_far:\n${storySoFar}\n\nCurrent message_to_player was: ${body.messageToPlayer ?? ""}\n\nReturn the next turn as a single JSON object only.`;
+
+  const options = body.options ?? {};
+  const systemPrompt = buildSystemPrompt({
+    shortSentencesOnly: options.shortSentencesOnly === true,
+    shortSentenceMinWords: options.shortSentenceMinWords,
+    shortSentenceMaxWords: options.shortSentenceMaxWords,
+    usePlayerWordsWhenPossible: options.usePlayerWordsWhenPossible === true,
+  });
 
   try {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -73,9 +121,10 @@ export async function POST(request: Request) {
         "anthropic-version": ANTHROPIC_VERSION,
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 1024,
-        system: SYSTEM_PROMPT,
+        model: "claude-3-haiku-20240307",
+        max_tokens: 2048,
+        cache_control: { type: "ephemeral" },
+        system: systemPrompt,
         messages: [{ role: "user", content: userContent }],
       }),
     });

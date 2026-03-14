@@ -6,6 +6,7 @@ import {
   parseStoryPayloadFromTrace,
   payloadHasUnresolvedPlaceholders,
   resolveMessageToPlayer,
+  coerceStorySoFar,
 } from "./storyBuddyUtils";
 
 type VoiceflowChat = {
@@ -154,7 +155,7 @@ export function useStoryBuddyVoiceflow({
           setChoicesState(normalized);
         }
 
-        const coercedStory = String(p.story_so_far ?? "");
+        const coercedStory = coerceStorySoFar(p.story_so_far);
         const coercedMsg = String(p.message_to_player ?? "");
         const coercedFinalTitle = String(p.final_title ?? "");
         const coercedFinalStory = String(p.final_story ?? "");

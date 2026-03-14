@@ -38,8 +38,8 @@ export async function POST(request: Request) {
         "anthropic-version": ANTHROPIC_VERSION,
       },
       body: JSON.stringify({
-        model: "claude-sonnet-4-20250514",
-        max_tokens: 1024,
+        model: "claude-3-haiku-20240307",
+        max_tokens: 512,
         messages: [{ role: "user", content: message }],
       }),
     });

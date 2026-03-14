@@ -25,25 +25,39 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
-/* Narinav / Story Buddy palette utilities (used when parent sets --palette-*) */
-.text-themed {
-  color: var(--palette-text, var(--foreground));
+/* Narinav theme: default text and panels use light text on dark */
+.narinav-theme {
+  color: #e8e6f0;
 }
-.bg-themed {
-  background-color: var(--palette-background, var(--background));
+.narinav-theme .text-themed,
+.narinav-theme [class*="text-themed"] {
+  color: #e8e6f0;
 }
-.border-primary {
-  border-color: var(--palette-primary, #a78bfa);
+.narinav-theme .bg-themed {
+  background-color: #0f1117;
 }
-.border-secondary {
-  border-color: var(--palette-secondary, #6b7280);
+.narinav-theme .border-primary {
+  border-color: #a78bfa;
 }
-.text-primary {
-  color: var(--palette-primary, #a78bfa);
+.narinav-theme .border-secondary {
+  border-color: #6b7280;
 }
-.text-secondary {
-  color: var(--palette-secondary, #6b7280);
+.narinav-theme .text-primary {
+  color: #a78bfa;
 }
-.text-accent {
-  color: var(--palette-accent, #f59e0b);
+.narinav-theme .text-secondary {
+  color: #9ca3af;
+}
+.narinav-theme .text-accent {
+  color: #f59e0b;
+}
+/* Ensure inputs and buttons in Narinav panels stay readable */
+.narinav-theme input::placeholder,
+.narinav-theme textarea::placeholder {
+  color: #6b7280;
+}
+.narinav-theme input,
+.narinav-theme textarea,
+.narinav-theme button {
+  color: #e8e6f0;
 }

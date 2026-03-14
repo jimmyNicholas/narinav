@@ -33,9 +33,10 @@ export function FinalStoryPanel({ finalTitle, finalStory }: FinalStoryPanelProps
 
 type StorySoFarPanelProps = {
   storySoFar: string;
+  turnCount?: number;
 };
 
-export function StorySoFarPanel({ storySoFar }: StorySoFarPanelProps) {
+export function StorySoFarPanel({ storySoFar, turnCount }: StorySoFarPanelProps) {
   return (
     <section
       className="border-[3px] border-primary rounded-3xl p-6 flex flex-col min-h-[500px] max-h-[560px] overflow-hidden"
@@ -45,9 +46,17 @@ export function StorySoFarPanel({ storySoFar }: StorySoFarPanelProps) {
           "color-mix(in srgb, var(--palette-background) 94%, var(--palette-secondary) 6%)",
       }}
     >
-      <h2 className="font-mono font-bold text-themed text-lg mb-3">
-        Story so far
-      </h2>
+      <div className="flex items-center justify-between gap-3 mb-3">
+        <h2 className="font-mono font-bold text-themed text-lg shrink-0">
+          Story so far
+        </h2>
+        <span
+          className="font-mono text-secondary text-sm shrink-0"
+          aria-label={turnCount != null ? `Turn ${turnCount}` : undefined}
+        >
+          {turnCount != null && turnCount > 0 ? `Turn ${turnCount}` : "—"}
+        </span>
+      </div>
       <div
         className="text-themed text-base leading-relaxed flex-1 overflow-y-auto"
         role="log"

@@ -1,7 +1,7 @@
 export const STORY_PAYLOAD_MESSAGE_TYPE = "story-buddy-payload";
 
 export type StoryPayload = {
-  story_so_far?: string;
+  story_so_far?: string | string[];
   message_to_player?: string;
   choices?: string[];
   /** Agent sometimes sends options as separate keys instead of choices[] */
@@ -60,8 +60,31 @@ export function resolveMessageToPlayer(
   return str.replace(/\\\\n/g, "\n").replace(/\\n/g, "\n");
 }
 
+/** Normalize story_so_far (string or string[]) into a single display string */
+export function coerceStorySoFar(
+  story: StoryPayload["story_so_far"]
+): string {
+  if (Array.isArray(story)) {
+    return story
+      .map((segment) => String(segment ?? "").trim())
+      .filter(Boolean)
+      .join("\n\n");
+  }
+  if (typeof story === "string") {
+    return story;
+  }
+  return "";
+}
+
 /** Parse story text into display segments */
-export function parseStoryLines(story: string | number): string[] {
+export function parseStoryLines(
+  story: string | number | string[]
+): string[] {
+  if (Array.isArray(story)) {
+    return story
+      .map((line) => String(line ?? "").replace(/^\s*\*\s*/, "").trim())
+      .filter(Boolean);
+  }
   return String(story ?? "")
     .split(/\n+/)
     .map((line) => line.replace(/^\s*\*\s*/, "").trim())
