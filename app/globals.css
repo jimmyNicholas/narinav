@@ -24,3 +24,26 @@ body {
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
 }
+
+/* Narinav / Story Buddy palette utilities (used when parent sets --palette-*) */
+.text-themed {
+  color: var(--palette-text, var(--foreground));
+}
+.bg-themed {
+  background-color: var(--palette-background, var(--background));
+}
+.border-primary {
+  border-color: var(--palette-primary, #a78bfa);
+}
+.border-secondary {
+  border-color: var(--palette-secondary, #6b7280);
+}
+.text-primary {
+  color: var(--palette-primary, #a78bfa);
+}
+.text-secondary {
+  color: var(--palette-secondary, #6b7280);
+}
+.text-accent {
+  color: var(--palette-accent, #f59e0b);
+}
