@@ -16,7 +16,6 @@ import {
   AGENCY_LOCK_THRESHOLD,
 } from "@/lib/constants";
 import { validateWordCount } from "@/lib/wordCount";
-import { BEAT_WORD_MIN, BEAT_WORD_MAX, REFINE_WORD_MIN, REFINE_WORD_MAX } from "@/lib/constants";
 import {
   FinalStoryPanel,
   OptionsPanel,
@@ -25,7 +24,7 @@ import {
   WelcomeOverlay,
   OpeningPrompt,
   RefinementPanel,
-} from "@/reference/StoryBuddyPanels";
+} from "./NarnavPanels";
 import {
   defaultNarinavOptions,
   type NarinavOptions,
@@ -103,6 +102,87 @@ async function callActiveBot(params: {
   return data;
 }
 
+async function callBeatBot(params: {
+  storySoFar: string[];
+  storyBible: StoryBible;
+  mode: GameMode;
+  totalTurnCount: number;
+  pathTurnLimit: number | null;
+  turnsSinceDecision: number;
+  maxTurns: number;
+  devMode: boolean;
+}): Promise<{ next_beats: [string, string, string] }> {
+  const res = await fetch("/api/story", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      action: "beatBot",
+      story_so_far: params.storySoFar,
+      story_bible: params.storyBible,
+      mode: params.mode,
+      total_turn_count: params.totalTurnCount,
+      path_turn_limit: params.pathTurnLimit,
+      turns_since_decision: params.turnsSinceDecision,
+      max_turns: params.maxTurns,
+      options: { devMode: params.devMode },
+    }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+  return data;
+}
+
+async function callRefinementBot(params: {
+  storySoFar: string[];
+  storyBible: StoryBible;
+  cleanedInput: string;
+  inputType: string;
+  mode: GameMode;
+  totalTurnCount: number;
+  devMode: boolean;
+}): Promise<{
+  renderings: [string, string, string];
+  natural_ending_detected: boolean;
+}> {
+  const res = await fetch("/api/story", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      action: "refinementBot",
+      story_so_far: params.storySoFar,
+      story_bible: params.storyBible,
+      cleaned_input: params.cleanedInput,
+      input_type: params.inputType,
+      mode: params.mode,
+      total_turn_count: params.totalTurnCount,
+      options: { devMode: params.devMode },
+    }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+  return data;
+}
+
+async function callStoryBibleUpdate(params: {
+  currentBible: StoryBible;
+  latestEntry: string;
+  devMode: boolean;
+}): Promise<{ story_bible_update: Parameters<typeof mergeStoryBible>[1] }> {
+  const res = await fetch("/api/story", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      action: "storyBibleUpdate",
+      current_bible: params.currentBible,
+      latest_entry: params.latestEntry,
+      options: { devMode: params.devMode },
+    }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+  return data;
+}
+
 async function callFinalStoryBot(params: {
   storySoFar: string[];
   storyBible: StoryBible;
@@ -166,9 +246,6 @@ export default function NarinavClient({
   ]);
   const [selectedRenderingIndex, setSelectedRenderingIndex] = useState(0);
   const [refinedText, setRefinedText] = useState("");
-  const [pendingStoryBibleUpdate, setPendingStoryBibleUpdate] = useState<
-    Record<string, unknown> | null
-  >(null);
   const [naturalEndingDetected, setNaturalEndingDetected] = useState(false);
 
   const [beatInputValue, setBeatInputValue] = useState("");
@@ -176,6 +253,9 @@ export default function NarinavClient({
   const [continueBibleJson, setContinueBibleJson] = useState("");
   const [loadedBibleForContinue, setLoadedBibleForContinue] =
     useState<StoryBible | null>(null);
+
+  const [selectedBeat, setSelectedBeat] = useState<string | null>(null);
+  const [beatRemovesLeft, setBeatRemovesLeft] = useState(2);
 
   const [isWaiting, setIsWaiting] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
@@ -190,20 +270,21 @@ export default function NarinavClient({
     turnsRemaining !== null && turnsRemaining <= AGENCY_LOCK_THRESHOLD;
 
   const storySoFarText = storySoFar.join("\n\n");
+  const beatInputMax = options.beatWordMax + 3;
   const beatWordValidation = validateWordCount(
     beatInputValue.trim(),
-    BEAT_WORD_MIN,
-    BEAT_WORD_MAX
+    options.beatWordMin,
+    beatInputMax
   );
   const openingWordValidation = validateWordCount(
     openingInputValue.trim(),
-    BEAT_WORD_MIN,
-    BEAT_WORD_MAX
+    options.beatWordMin,
+    beatInputMax
   );
   const refineWordValidation = validateWordCount(
     refinedText.trim(),
-    REFINE_WORD_MIN,
-    REFINE_WORD_MAX
+    options.refineWordMin,
+    options.refineWordMax
   );
 
   const handleStartNewStory = useCallback(() => {
@@ -217,6 +298,8 @@ export default function NarinavClient({
     setTurnsSinceDecision(0);
     setChapterNumber(1);
     setNextBeats(["", "", ""]);
+    setSelectedBeat(null);
+    setBeatRemovesLeft(2);
     setErrorMessage("");
   }, []);
 
@@ -256,32 +339,29 @@ export default function NarinavClient({
       bible.summary && String(bible.summary).trim()
         ? String(bible.summary).slice(0, 200)
         : "Continue the story.";
-    callActiveBot({
-      cleanedInput: firstBeat,
-      inputType: "pre_generated",
+    callRefinementBot({
       storySoFar: [],
       storyBible: bible,
-      totalTurnCount: 0,
+      cleanedInput: firstBeat,
+      inputType: "pre_generated",
       mode: "open",
-      pathTurnLimit: null,
-      turnsSinceDecision: 0,
-      maxTurns,
+      totalTurnCount: 0,
       devMode: options.devMode,
     })
-      .then((r) => {
-        setRenderings(r.renderings);
-        setRenderingTones(r.rendering_tones);
-        setNextBeats(r.next_beats);
-        setSelectedRenderingIndex(0);
-        setRefinedText(r.renderings[0] ?? "");
-        setPendingStoryBibleUpdate(r.story_bible_update);
-        setNaturalEndingDetected(r.natural_ending_detected);
-        setView("refinement");
-      })
-      .catch((err) => {
-        setErrorMessage(err instanceof Error ? err.message : "Request failed");
-        setView("continuePrompt");
-      })
+        .then((r) => {
+          setRenderings(r.renderings);
+          setRenderingTones(["", "", ""]);
+          setSelectedRenderingIndex(0);
+          setRefinedText(r.renderings[0] ?? "");
+          setNaturalEndingDetected(r.natural_ending_detected);
+          setSelectedBeat(firstBeat);
+          setBeatRemovesLeft(2);
+          setView("refinement");
+        })
+        .catch((err) => {
+          setErrorMessage(err instanceof Error ? err.message : "Request failed");
+          setView("continuePrompt");
+        })
       .finally(() => setIsWaiting(false));
     setIsWaiting(true);
   }, [loadedBibleForContinue, maxTurns, options.devMode]);
@@ -292,26 +372,23 @@ export default function NarinavClient({
       setErrorMessage("");
       setIsWaiting(true);
       const run = (cleanedInput: string, inputType: string) => {
-        callActiveBot({
-          cleanedInput,
-          inputType,
+        callRefinementBot({
           storySoFar: [],
           storyBible: createEmptyStoryBible(),
-          totalTurnCount: 0,
+          cleanedInput,
+          inputType,
           mode: "open",
-          pathTurnLimit: null,
-          turnsSinceDecision: 0,
-          maxTurns,
+          totalTurnCount: 0,
           devMode: options.devMode,
         })
           .then((r) => {
             setRenderings(r.renderings);
-            setRenderingTones(r.rendering_tones);
-            setNextBeats(r.next_beats);
+            setRenderingTones(["", "", ""]);
             setSelectedRenderingIndex(0);
             setRefinedText(r.renderings[0] ?? "");
-            setPendingStoryBibleUpdate(r.story_bible_update);
             setNaturalEndingDetected(r.natural_ending_detected);
+            setSelectedBeat(beat.trim());
+            setBeatRemovesLeft(2);
             setView("refinement");
           })
           .catch((err) => {
@@ -345,7 +422,7 @@ export default function NarinavClient({
   const handleOpeningSubmitCustom = useCallback(() => {
     const text = openingInputValue.trim();
     if (!text) return;
-    const v = validateWordCount(text, BEAT_WORD_MIN, BEAT_WORD_MAX);
+    const v = validateWordCount(text, options.beatWordMin, options.beatWordMax + 3);
     if (!v.valid) {
       setErrorMessage(v.message);
       return;
@@ -353,7 +430,7 @@ export default function NarinavClient({
     setErrorMessage("");
     submitOpeningBeat(text);
     setOpeningInputValue("");
-  }, [openingInputValue, submitOpeningBeat]);
+  }, [openingInputValue, options.beatWordMin, options.beatWordMax, submitOpeningBeat]);
 
   const handleBeatClick = useCallback(
     (index: number, choiceText: string) => {
@@ -361,6 +438,35 @@ export default function NarinavClient({
       setView("loading");
       setErrorMessage("");
       setIsWaiting(true);
+
+      if (mode === "open" || mode === "continue") {
+        callRefinementBot({
+          storySoFar,
+          storyBible,
+          cleanedInput: choiceText,
+          inputType: "pre_generated",
+          mode,
+          totalTurnCount,
+          devMode: options.devMode,
+        })
+          .then((r) => {
+            setRenderings(r.renderings);
+            setRenderingTones(["", "", ""]);
+            setSelectedRenderingIndex(0);
+            setRefinedText(r.renderings[0] ?? "");
+            setNaturalEndingDetected(r.natural_ending_detected);
+            setSelectedBeat(choiceText);
+            setBeatRemovesLeft(2);
+            setView("refinement");
+          })
+          .catch((err) => {
+            setErrorMessage(err instanceof Error ? err.message : "Request failed");
+            setView("beatChoice");
+          })
+          .finally(() => setIsWaiting(false));
+        return;
+      }
+
       callActiveBot({
         cleanedInput: choiceText,
         inputType: "pre_generated",
@@ -379,11 +485,12 @@ export default function NarinavClient({
           setNextBeats(r.next_beats);
           setSelectedRenderingIndex(0);
           setRefinedText(r.renderings[0] ?? "");
-          setPendingStoryBibleUpdate(r.story_bible_update);
           setNaturalEndingDetected(r.natural_ending_detected);
           if (mode === "ending" && r.moral != null) setMoral(r.moral);
           if (mode === "chapter" && r.chapter_bible != null)
             setChapterBible(r.chapter_bible);
+          setSelectedBeat(choiceText);
+          setBeatRemovesLeft(2);
           setView("refinement");
         })
         .catch((err) => {
@@ -409,7 +516,7 @@ export default function NarinavClient({
   const handleBeatSubmitCustom = useCallback(() => {
     const text = beatInputValue.trim();
     if (!text || view !== "beatChoice" || isWaiting) return;
-    const v = validateWordCount(text, BEAT_WORD_MIN, BEAT_WORD_MAX);
+    const v = validateWordCount(text, options.beatWordMin, options.beatWordMax + 3);
     if (!v.valid) {
       setErrorMessage(v.message);
       return;
@@ -417,35 +524,59 @@ export default function NarinavClient({
     setErrorMessage("");
     setView("loading");
     setIsWaiting(true);
-    classifyInput(text, options.devMode)
-      .then((c) =>
-        callActiveBot({
-          cleanedInput: c.cleaned_input,
-          inputType: c.input_type,
+
+    const runRefinement = (cleanedInput: string, inputType: string) => {
+      if (mode === "open" || mode === "continue") {
+        return callRefinementBot({
           storySoFar,
           storyBible,
-          totalTurnCount,
+          cleanedInput,
+          inputType,
           mode,
-          pathTurnLimit,
-          turnsSinceDecision,
-          maxTurns,
+          totalTurnCount,
           devMode: options.devMode,
-        })
-      )
-      .then((r) => {
+        }).then((r) => {
+          setRenderings(r.renderings);
+          setRenderingTones(["", "", ""]);
+          setSelectedRenderingIndex(0);
+          setRefinedText(r.renderings[0] ?? "");
+          setNaturalEndingDetected(r.natural_ending_detected);
+          setSelectedBeat(text);
+          setBeatRemovesLeft(2);
+          setView("refinement");
+          setBeatInputValue("");
+        });
+      }
+      return callActiveBot({
+        cleanedInput,
+        inputType,
+        storySoFar,
+        storyBible,
+        totalTurnCount,
+        mode,
+        pathTurnLimit,
+        turnsSinceDecision,
+        maxTurns,
+        devMode: options.devMode,
+      }).then((r) => {
         setRenderings(r.renderings);
         setRenderingTones(r.rendering_tones);
         setNextBeats(r.next_beats);
         setSelectedRenderingIndex(0);
         setRefinedText(r.renderings[0] ?? "");
-        setPendingStoryBibleUpdate(r.story_bible_update);
         setNaturalEndingDetected(r.natural_ending_detected);
         if (mode === "ending" && r.moral != null) setMoral(r.moral);
         if (mode === "chapter" && r.chapter_bible != null)
           setChapterBible(r.chapter_bible);
+        setSelectedBeat(text);
+        setBeatRemovesLeft(2);
         setView("refinement");
         setBeatInputValue("");
-      })
+      });
+    };
+
+    classifyInput(text, options.devMode)
+      .then((c) => runRefinement(c.cleaned_input, c.input_type))
       .catch((err) => {
         setErrorMessage(err instanceof Error ? err.message : "Request failed");
         setView("beatChoice");
@@ -463,6 +594,8 @@ export default function NarinavClient({
     turnsSinceDecision,
     maxTurns,
     options.devMode,
+    options.beatWordMin,
+    options.beatWordMax,
   ]);
 
   const triggerEndGame = useCallback(
@@ -494,18 +627,23 @@ export default function NarinavClient({
     (textToCommit: string) => {
       const nextStory = [...storySoFar, textToCommit];
       setStorySoFar(nextStory);
-      if (pendingStoryBibleUpdate) {
-        setStoryBible((b) =>
-          mergeStoryBible(b, pendingStoryBibleUpdate as Parameters<typeof mergeStoryBible>[1])
-        );
-        setPendingStoryBibleUpdate(null);
-      }
+      callStoryBibleUpdate({
+        currentBible: storyBible,
+        latestEntry: textToCommit,
+        devMode: options.devMode,
+      })
+        .then((r) => {
+          setStoryBible((b) => mergeStoryBible(b, r.story_bible_update));
+        })
+        .catch(() => {
+          // Non-blocking: keep current bible on failure
+        });
       const nextTurnCount = totalTurnCount + 1;
       const nextTurnsSince = turnsSinceDecision + 1;
       setTotalTurnCount(nextTurnCount);
       setTurnsSinceDecision(nextTurnCount === 0 ? 0 : nextTurnsSince);
       setRefinedText("");
-      setView("beatChoice");
+      setSelectedBeat(null);
 
       if (nextTurnCount >= maxTurns) {
         triggerEndGame(nextStory);
@@ -543,18 +681,45 @@ export default function NarinavClient({
         setView("decision");
         return;
       }
+
+      if (mode === "open" || mode === "continue") {
+        setIsWaiting(true);
+        setView("loading");
+        callBeatBot({
+          storySoFar: nextStory,
+          storyBible,
+          mode,
+          totalTurnCount: nextTurnCount,
+          pathTurnLimit,
+          turnsSinceDecision: nextTurnsSince,
+          maxTurns,
+          devMode: options.devMode,
+        })
+          .then((r) => {
+            setNextBeats(r.next_beats);
+            setView("beatChoice");
+          })
+          .catch((err) => {
+            setErrorMessage(err instanceof Error ? err.message : "Request failed");
+            setView("beatChoice");
+          })
+          .finally(() => setIsWaiting(false));
+      } else {
+        setView("beatChoice");
+      }
     },
     [
       storySoFar,
+      storyBible,
       totalTurnCount,
       turnsSinceDecision,
-      pendingStoryBibleUpdate,
       pathTurnLimit,
       mode,
       decisionCount,
       maxTurns,
       naturalEndingDetected,
       triggerEndGame,
+      options.devMode,
     ]
   );
 
@@ -564,7 +729,7 @@ export default function NarinavClient({
       : refinedText.trim();
     if (!text) return;
     if (!agencyLocked) {
-      const v = validateWordCount(text, REFINE_WORD_MIN, REFINE_WORD_MAX);
+      const v = validateWordCount(text, options.refineWordMin, options.refineWordMax);
       if (!v.valid) {
         setErrorMessage(v.message);
         return;
@@ -578,6 +743,8 @@ export default function NarinavClient({
     selectedRenderingIndex,
     refinedText,
     commitSentence,
+    options.refineWordMin,
+    options.refineWordMax,
   ]);
 
   const handleSelectRendering = useCallback(
@@ -590,6 +757,12 @@ export default function NarinavClient({
 
   const handleRefinedTextChange = useCallback((value: string) => {
     setRefinedText(value);
+  }, []);
+
+  const handleRemoveBeat = useCallback(() => {
+    setBeatRemovesLeft((n) => Math.max(0, n - 1));
+    setSelectedBeat(null);
+    setView("beatChoice");
   }, []);
 
   const handleDecision = useCallback(
@@ -733,6 +906,7 @@ export default function NarinavClient({
           wordCountMessage={openingInputValue.trim() ? openingWordValidation.message : ""}
           isSubmitting={isWaiting}
           customInputRef={openingInputRef}
+          customInputPlaceholder={`${options.beatWordMin}–${options.beatWordMax + 3} words`}
         />
         {errorMessage && (
           <p className="text-sm text-red-500 font-mono">{errorMessage}</p>
@@ -755,6 +929,9 @@ export default function NarinavClient({
         <StorySoFarPanel
           storySoFar={storySoFarText}
           turnCount={totalTurnCount}
+          selectedBeat={selectedBeat}
+          onRemoveBeat={handleRemoveBeat}
+          canRemoveBeat={beatRemovesLeft > 0}
         />
         <RefinementPanel
           renderings={renderings}
@@ -767,6 +944,9 @@ export default function NarinavClient({
           onAddToStory={handleAddToStory}
           agencyLocked={agencyLocked}
           isSubmitting={isWaiting}
+          refineWordMin={options.refineWordMin}
+          refineWordMax={options.refineWordMax}
+          onClearEditable={() => setRefinedText("")}
         />
         {errorMessage && (
           <p className="lg:col-span-2 text-sm text-red-500 font-mono">
@@ -966,9 +1146,18 @@ export default function NarinavClient({
       />
       <div className="flex flex-col gap-4 min-h-[500px]">
         {turnHeader && (
-          <p className="font-mono text-themed text-lg font-medium">
-            {turnHeader}
-          </p>
+          <section
+            className="border-2 border-secondary rounded-3xl p-5"
+            aria-label="Message"
+            style={{
+              backgroundColor:
+                "color-mix(in srgb, var(--palette-background) 97%, var(--palette-secondary) 3%)",
+            }}
+          >
+            <p className="text-themed text-2xl leading-relaxed whitespace-pre-line font-mono font-medium">
+              {turnHeader}
+            </p>
+          </section>
         )}
         {errorMessage && (
           <p className="text-sm text-red-500 font-mono">{errorMessage}</p>

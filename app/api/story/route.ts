@@ -12,17 +12,20 @@ import {
   type FinalStoryResponse,
   type GameMode,
   type StoryBible,
+  type StoryBibleUpdate,
 } from "@/lib/navinavTypes";
 import { createMessage, extractJson } from "./anthropic";
 import {
   inputClassifierUser,
   INPUT_CLASSIFIER_SYSTEM,
-  storyBotUser,
-  STORY_BOT_SYSTEM,
-  endingBotUser,
-  ENDING_BOT_SYSTEM,
-  cliffhangerBotUser,
-  CLIFFHANGER_BOT_SYSTEM,
+  beatBotUser,
+  BEAT_BOT_SYSTEM,
+  refinementBotUser,
+  REFINEMENT_BOT_SYSTEM,
+  storyBibleUpdateUser,
+  STORY_BIBLE_UPDATE_SYSTEM,
+  closingBotUser,
+  CLOSING_BOT_SYSTEM,
   finalStoryBotUser,
   FINAL_STORY_BOT_SYSTEM,
 } from "./prompts";
@@ -127,6 +130,52 @@ function parseFinalStoryResponse(text: string): FinalStoryResponse | null {
   }
 }
 
+function parseStoryBibleUpdateResponse(text: string): StoryBibleUpdate | null {
+  try {
+    const json = extractJson(text);
+    const o = JSON.parse(json) as Record<string, unknown>;
+    const update = o.story_bible_update;
+    if (update == null || typeof update !== "object") return null;
+    return update as StoryBibleUpdate;
+  } catch {
+    return null;
+  }
+}
+
+function parseBeatBotResponse(text: string): { next_beats: [string, string, string] } | null {
+  try {
+    const json = extractJson(text);
+    const o = JSON.parse(json) as Record<string, unknown>;
+    const next_beats = ensureTriple(
+      Array.isArray(o.next_beats) ? o.next_beats : [],
+      ""
+    );
+    return { next_beats };
+  } catch {
+    return null;
+  }
+}
+
+function parseRefinementBotResponse(text: string): {
+  renderings: [string, string, string];
+  natural_ending_detected: boolean;
+} | null {
+  try {
+    const json = extractJson(text);
+    const o = JSON.parse(json) as Record<string, unknown>;
+    const renderings = ensureTriple(
+      Array.isArray(o.renderings) ? o.renderings : [],
+      ""
+    );
+    return {
+      renderings,
+      natural_ending_detected: Boolean(o.natural_ending_detected),
+    };
+  } catch {
+    return null;
+  }
+}
+
 export async function POST(request: Request) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
@@ -143,6 +192,8 @@ export async function POST(request: Request) {
     input_type?: string;
     story_so_far?: string[];
     story_bible?: StoryBible;
+    current_bible?: StoryBible;
+    latest_entry?: string;
     total_turn_count?: number;
     mode?: GameMode;
     path_turn_limit?: number | null;
@@ -192,6 +243,102 @@ export async function POST(request: Request) {
     }
   }
 
+  if (body.action === "beatBot") {
+    const storySoFar = Array.isArray(body.story_so_far)
+      ? body.story_so_far
+      : [];
+    const storyBible: StoryBible =
+      body.story_bible && typeof body.story_bible === "object"
+        ? body.story_bible
+        : createEmptyStoryBible();
+    const totalTurnCount = Number(body.total_turn_count) || 0;
+    const mode = (body.mode as GameMode) ?? "open";
+    const narrativePosition =
+      maxTurns > 0 ? Math.min(1, totalTurnCount / maxTurns) : 0;
+    const recentStory = getRecentStory(storySoFar, totalTurnCount);
+    const storyBibleStr = JSON.stringify(storyBible, null, 0);
+    try {
+      const userContent = beatBotUser({
+        storyBible: storyBibleStr,
+        recentStory,
+        narrativePosition,
+        mode,
+      });
+      const text = await createMessage({
+        apiKey,
+        model: getModel(devMode, false),
+        system: BEAT_BOT_SYSTEM,
+        messages: [{ role: "user", content: userContent }],
+        maxTokens: 512,
+      });
+      const result = parseBeatBotResponse(text);
+      if (!result) {
+        return NextResponse.json(
+          { error: "Could not parse Beat Bot response", raw: text.slice(0, 500) },
+          { status: 502 }
+        );
+      }
+      return NextResponse.json(result);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Anthropic API request failed";
+      return NextResponse.json({ error: message }, { status: 502 });
+    }
+  }
+
+  if (body.action === "refinementBot") {
+    const storySoFar = Array.isArray(body.story_so_far)
+      ? body.story_so_far
+      : [];
+    const storyBible: StoryBible =
+      body.story_bible && typeof body.story_bible === "object"
+        ? body.story_bible
+        : createEmptyStoryBible();
+    const cleanedInput = String(body.cleaned_input ?? "").trim();
+    const inputType = String(body.input_type ?? "pre_generated");
+    const mode = (body.mode as GameMode) ?? "open";
+    const totalTurnCount = Number(body.total_turn_count) || 0;
+    const recentStory = getRecentStory(storySoFar, totalTurnCount);
+    const storyBibleStr = JSON.stringify(storyBible, null, 0);
+    if (!cleanedInput) {
+      return NextResponse.json(
+        { error: "refinementBot requires cleaned_input" },
+        { status: 400 }
+      );
+    }
+    try {
+      const userContent = refinementBotUser({
+        storyBible: storyBibleStr,
+        recentStory,
+        mode,
+        inputType,
+        cleanedInput,
+      });
+      const text = await createMessage({
+        apiKey,
+        model: getModel(devMode, false),
+        system: REFINEMENT_BOT_SYSTEM,
+        messages: [{ role: "user", content: userContent }],
+        maxTokens: 2048,
+      });
+      const result = parseRefinementBotResponse(text);
+      if (!result) {
+        return NextResponse.json(
+          {
+            error: "Could not parse Refinement Bot response",
+            raw: text.slice(0, 500),
+          },
+          { status: 502 }
+        );
+      }
+      return NextResponse.json(result);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Anthropic API request failed";
+      return NextResponse.json({ error: message }, { status: 502 });
+    }
+  }
+
   if (body.action === "activeBot") {
     const cleanedInput = String(body.cleaned_input ?? "").trim();
     const inputType = String(body.input_type ?? "pre_generated");
@@ -207,84 +354,38 @@ export async function POST(request: Request) {
     const pathTurnLimit = body.path_turn_limit ?? null;
     const turnsSinceDecision = Number(body.turns_since_decision) || 0;
 
-    const narrativePosition =
-      maxTurns > 0 ? Math.min(1, totalTurnCount / maxTurns) : 0;
     const turnsRemaining =
       pathTurnLimit !== null ? pathTurnLimit - turnsSinceDecision : null;
     const endingPressure = getEndingPressure(turnsRemaining);
     const recentStory = getRecentStory(storySoFar, totalTurnCount);
     const storyBibleStr = JSON.stringify(storyBible, null, 0);
 
-    const isStoryBot = mode === "open" || mode === "continue";
-    const isEndingBot = mode === "ending";
-    const isCliffhangerBot = mode === "chapter";
+    if (mode === "open" || mode === "continue") {
+      return NextResponse.json(
+        {
+          error:
+            "For open/continue use beatBot and refinementBot. activeBot is for ending or chapter only.",
+        },
+        { status: 400 }
+      );
+    }
 
-    try {
-      if (isStoryBot) {
-        const userContent = storyBotUser({
-          storyBible: storyBibleStr,
-          recentStory,
-          narrativePosition,
-          mode,
-          inputType,
-          cleanedInput,
-        });
-        const text = await createMessage({
-          apiKey,
-          model: getModel(devMode, false),
-          system: STORY_BOT_SYSTEM,
-          messages: [{ role: "user", content: userContent }],
-          maxTokens: 2048,
-        });
-        const result = parseActiveBotResponse(text);
-        if (!result) {
-          return NextResponse.json(
-            { error: "Could not parse Story Bot response", raw: text.slice(0, 500) },
-            { status: 502 }
-          );
-        }
-        return NextResponse.json(result);
-      }
-
-      if (isEndingBot) {
-        const userContent = endingBotUser({
+    if (mode === "ending" || mode === "chapter") {
+      const closeType = mode === "chapter" ? "chapter" : "story";
+      try {
+        const userContent = closingBotUser({
           storyBible: storyBibleStr,
           recentStory,
           turnsRemaining: turnsRemaining ?? 0,
           endingPressure,
+          closeType,
           inputType,
           cleanedInput,
         });
         const text = await createMessage({
           apiKey,
           model: getModel(devMode, false),
-          system: ENDING_BOT_SYSTEM,
-          messages: [{ role: "user", content: userContent }],
-          maxTokens: 2048,
-        });
-        const result = parseActiveBotResponse(text);
-        if (!result) {
-          return NextResponse.json(
-            { error: "Could not parse Ending Bot response", raw: text.slice(0, 500) },
-            { status: 502 }
-          );
-        }
-        return NextResponse.json(result);
-      }
-
-      if (isCliffhangerBot) {
-        const userContent = cliffhangerBotUser({
-          storyBible: storyBibleStr,
-          recentStory,
-          turnsRemaining: turnsRemaining ?? 0,
-          endingPressure,
-          inputType,
-          cleanedInput,
-        });
-        const text = await createMessage({
-          apiKey,
-          model: getModel(devMode, false),
-          system: CLIFFHANGER_BOT_SYSTEM,
+          system: CLOSING_BOT_SYSTEM,
           messages: [{ role: "user", content: userContent }],
           maxTokens: 2048,
         });
@@ -292,19 +393,61 @@ export async function POST(request: Request) {
         if (!result) {
           return NextResponse.json(
             {
-              error: "Could not parse Cliffhanger Bot response",
+              error: "Could not parse Closing Bot response",
               raw: text.slice(0, 500),
             },
             { status: 502 }
           );
         }
         return NextResponse.json(result);
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : "Anthropic API request failed";
+        return NextResponse.json({ error: message }, { status: 502 });
       }
+    }
 
+    return NextResponse.json(
+      { error: "Unknown mode for activeBot" },
+      { status: 400 }
+    );
+  }
+
+  if (body.action === "storyBibleUpdate") {
+    const currentBible: StoryBible =
+      body.current_bible && typeof body.current_bible === "object"
+        ? body.current_bible
+        : createEmptyStoryBible();
+    const latestEntry = String(body.latest_entry ?? "").trim();
+    if (!latestEntry) {
       return NextResponse.json(
-        { error: "Unknown mode for activeBot" },
+        { error: "storyBibleUpdate requires latest_entry" },
         { status: 400 }
       );
+    }
+    try {
+      const userContent = storyBibleUpdateUser({
+        currentBible: JSON.stringify(currentBible, null, 0),
+        latestEntry,
+      });
+      const text = await createMessage({
+        apiKey,
+        model: getModel(devMode, false),
+        system: STORY_BIBLE_UPDATE_SYSTEM,
+        messages: [{ role: "user", content: userContent }],
+        maxTokens: 1024,
+      });
+      const story_bible_update = parseStoryBibleUpdateResponse(text);
+      if (!story_bible_update) {
+        return NextResponse.json(
+          {
+            error: "Could not parse Story Bible Update response",
+            raw: text.slice(0, 500),
+          },
+          { status: 502 }
+        );
+      }
+      return NextResponse.json({ story_bible_update });
     } catch (err) {
       const message =
         err instanceof Error ? err.message : "Anthropic API request failed";
@@ -359,7 +502,9 @@ export async function POST(request: Request) {
   }
 
   return NextResponse.json(
-    { error: "Unknown action. Use classify, activeBot, or finalStory." },
+    {
+      error: "Unknown action. Use classify, beatBot, refinementBot, activeBot (ending/chapter), storyBibleUpdate, or finalStory.",
+    },
     { status: 400 }
   );
 }

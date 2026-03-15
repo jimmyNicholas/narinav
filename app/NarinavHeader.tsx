@@ -87,7 +87,7 @@ export function NarinavHeader({ options, onOptionsChange }: NarinavHeaderProps) 
           aria-expanded={panelOpen}
           aria-haspopup="dialog"
           aria-controls={panelOpen ? panelId : undefined}
-          className="p-2 rounded-xl border-2 border-secondary text-themed transition-colors hover:bg-[color:var(--palette-primary)]/14 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--palette-background)]"
+          className="p-2 rounded-xl border-2 border-secondary text-themed transition-colors hover:bg-(--palette-primary)/14 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-(--palette-background)"
           style={{
             backgroundColor:
               "color-mix(in srgb, var(--palette-background) 90%, var(--palette-secondary) 10%)",
