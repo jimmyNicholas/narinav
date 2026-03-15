@@ -18,13 +18,13 @@ export const metadata: Metadata = {
   description: "An interactive story-building companion powered by Claude.",
 };
 
-const narinavThemeVars: CSSProperties = {
+const narinavThemeVars = {
   "--palette-background": "#0F1117",
   "--palette-text": "#E8E6F0",
   "--palette-primary": "#A78BFA",
   "--palette-secondary": "#6B7280",
   "--palette-accent": "#F59E0B",
-};
+} as CSSProperties;
 
 export default function RootLayout({
   children,

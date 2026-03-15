@@ -60,9 +60,19 @@ export function NarinavHeader({ options, onOptionsChange }: NarinavHeaderProps) 
       }}
     >
       <div className="space-y-2 flex-1">
-        <h1 className="font-mono font-bold text-themed text-2xl md:text-3xl">
-          Narinav
-        </h1>
+        <div className="flex items-center gap-2 flex-wrap">
+          <h1 className="font-mono font-bold text-themed text-2xl md:text-3xl">
+            Narinav
+          </h1>
+          {options.devMode && (
+            <span
+              className="rounded-md px-2 py-0.5 font-mono text-xs border border-secondary text-secondary"
+              title="All API calls use claude-3-haiku-20240307"
+            >
+              Dev mode — claude-3-haiku-20240307
+            </span>
+          )}
+        </div>
         <p className="text-secondary leading-relaxed text-sm">
           An interactive story-building companion. Co-write a story with Claude.
         </p>

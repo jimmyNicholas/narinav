@@ -1,31 +1,36 @@
 "use client";
 
 import React from "react";
+import {
+  BEAT_WORD_MIN,
+  BEAT_WORD_MAX,
+  REFINE_WORD_MIN,
+  REFINE_WORD_MAX,
+  MAX_TURNS,
+} from "@/lib/constants";
 
 const STORAGE_KEY = "narinav-options";
 const MIN_TURNS = 5;
-const MAX_TURNS = 30;
-const DEFAULT_MAX_TURNS = 6;
-
-const MIN_SENTENCE_WORDS = 5;
-const MAX_SENTENCE_WORDS = 25;
-const DEFAULT_SENTENCE_MIN = 8;
-const DEFAULT_SENTENCE_MAX = 18;
+const MAX_TURNS_UI = 30;
+const DEFAULT_MAX_TURNS = MAX_TURNS;
 
 export type NarinavOptions = {
-  shortSentencesOnly: boolean;
-  shortSentenceMinWords: number;
-  shortSentenceMaxWords: number;
+  devMode: boolean;
   maxTurns: number;
-  usePlayerWordsWhenPossible: boolean;
+  /** Beat word limit is fixed 8–18 per spec; displayed for reference. */
+  beatWordMin: number;
+  beatWordMax: number;
+  refineWordMin: number;
+  refineWordMax: number;
 };
 
 export const defaultNarinavOptions: NarinavOptions = {
-  shortSentencesOnly: false,
-  shortSentenceMinWords: DEFAULT_SENTENCE_MIN,
-  shortSentenceMaxWords: DEFAULT_SENTENCE_MAX,
+  devMode: true,
   maxTurns: DEFAULT_MAX_TURNS,
-  usePlayerWordsWhenPossible: false,
+  beatWordMin: BEAT_WORD_MIN,
+  beatWordMax: BEAT_WORD_MAX,
+  refineWordMin: REFINE_WORD_MIN,
+  refineWordMax: REFINE_WORD_MAX,
 };
 
 function loadOptions(): NarinavOptions {
@@ -34,20 +39,13 @@ function loadOptions(): NarinavOptions {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return defaultNarinavOptions;
     const parsed = JSON.parse(raw) as Partial<NarinavOptions>;
-    const minWords = clampSentenceWords(
-      parsed.shortSentenceMinWords ?? DEFAULT_SENTENCE_MIN
-    );
-    const maxWords = clampSentenceWords(
-      parsed.shortSentenceMaxWords ?? DEFAULT_SENTENCE_MAX
-    );
-    const normalizedMin = Math.min(minWords, maxWords);
-    const normalizedMax = Math.max(minWords, maxWords);
     return {
-      shortSentencesOnly: Boolean(parsed.shortSentencesOnly),
-      shortSentenceMinWords: normalizedMin,
-      shortSentenceMaxWords: normalizedMax,
+      devMode: parsed.devMode !== false,
       maxTurns: clampMaxTurns(parsed.maxTurns ?? DEFAULT_MAX_TURNS),
-      usePlayerWordsWhenPossible: Boolean(parsed.usePlayerWordsWhenPossible),
+      beatWordMin: parsed.beatWordMin ?? BEAT_WORD_MIN,
+      beatWordMax: parsed.beatWordMax ?? BEAT_WORD_MAX,
+      refineWordMin: parsed.refineWordMin ?? REFINE_WORD_MIN,
+      refineWordMax: parsed.refineWordMax ?? REFINE_WORD_MAX,
     };
   } catch {
     return defaultNarinavOptions;
@@ -57,16 +55,7 @@ function loadOptions(): NarinavOptions {
 function clampMaxTurns(n: number): number {
   const num = Number(n);
   if (Number.isNaN(num)) return DEFAULT_MAX_TURNS;
-  return Math.min(MAX_TURNS, Math.max(MIN_TURNS, Math.round(num)));
-}
-
-function clampSentenceWords(n: number): number {
-  const num = Number(n);
-  if (Number.isNaN(num)) return DEFAULT_SENTENCE_MIN;
-  return Math.min(
-    MAX_SENTENCE_WORDS,
-    Math.max(MIN_SENTENCE_WORDS, Math.round(num))
-  );
+  return Math.min(MAX_TURNS_UI, Math.max(MIN_TURNS, Math.round(num)));
 }
 
 function saveOptions(options: NarinavOptions) {
@@ -103,30 +92,12 @@ export function NarinavOptionsPanel({
       if (typeof next.maxTurns === "number") {
         next.maxTurns = clampMaxTurns(next.maxTurns);
       }
-      if (typeof next.shortSentenceMinWords === "number") {
-        next.shortSentenceMinWords = clampSentenceWords(
-          next.shortSentenceMinWords
-        );
-      }
-      if (typeof next.shortSentenceMaxWords === "number") {
-        next.shortSentenceMaxWords = clampSentenceWords(
-          next.shortSentenceMaxWords
-        );
-      }
-      if (next.shortSentenceMinWords > next.shortSentenceMaxWords) {
-        const mid = Math.round(
-          (next.shortSentenceMinWords + next.shortSentenceMaxWords) / 2
-        );
-        next.shortSentenceMinWords = mid;
-        next.shortSentenceMaxWords = mid;
-      }
       onOptionsChange(next);
       saveOptions(next);
     },
     [options, onOptionsChange]
   );
 
-  // Focus first focusable when opening; restore focus to trigger when closing
   React.useEffect(() => {
     if (!isOpen) return;
     const firstFocusable = panelRef.current?.querySelector<HTMLElement>(
@@ -160,129 +131,24 @@ export function NarinavOptionsPanel({
       }}
     >
       <div className="space-y-4">
-        {/* Short sentences only (configurable min/max) */}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between gap-3">
-            <label
-              htmlFor="narinav-opt-short-sentences"
-              className="text-sm text-themed cursor-pointer flex-1"
-            >
-              Short sentences only (5–25 words, default 8–18)
-            </label>
-            <button
-              id="narinav-opt-short-sentences"
-              type="button"
-              role="switch"
-              aria-checked={options.shortSentencesOnly}
-              aria-label="Short sentences only (5–25 words, default 8–18)"
-              onClick={() =>
-                update({ shortSentencesOnly: !options.shortSentencesOnly })
-              }
-              className="relative inline-flex h-6 w-10 shrink-0 rounded-full border-2 border-secondary transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--palette-background)]"
-              style={{
-                backgroundColor: options.shortSentencesOnly
-                  ? "var(--palette-primary)"
-                  : "color-mix(in srgb, var(--palette-background) 85%, var(--palette-secondary) 15%)",
-              }}
-            >
-              <span
-                className="pointer-events-none inline-block h-5 w-5 rounded-full bg-[var(--palette-background)] shadow ring-0 transition-transform"
-                style={{
-                  transform: options.shortSentencesOnly
-                    ? "translateX(1rem)"
-                    : "translateX(0.125rem)",
-                }}
-              />
-            </button>
-          </div>
-          <div className="flex flex-col gap-2 pl-1 pr-1">
-            <div className="flex items-center justify-between text-xs text-secondary font-mono">
-              <span>
-                Range: {options.shortSentenceMinWords}–{options.shortSentenceMaxWords} words
-              </span>
-            </div>
-            <div className="flex items-center gap-3">
-              <label
-                htmlFor="narinav-opt-short-min-input"
-                className="text-xs text-themed"
-              >
-                Min
-              </label>
-              <input
-                id="narinav-opt-short-min-input"
-                type="number"
-                min={MIN_SENTENCE_WORDS}
-                max={MAX_SENTENCE_WORDS}
-                value={options.shortSentenceMinWords}
-                disabled={!options.shortSentencesOnly}
-                onChange={(e) =>
-                  update({
-                    shortSentenceMinWords: e.target.valueAsNumber,
-                  })
-                }
-                className="w-16 rounded-lg border-2 border-secondary bg-transparent px-2 py-1 text-themed text-xs text-right font-mono focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--palette-background)]"
-              />
-              <label
-                htmlFor="narinav-opt-short-max-input"
-                className="text-xs text-themed"
-              >
-                Max
-              </label>
-              <input
-                id="narinav-opt-short-max-input"
-                type="number"
-                min={MIN_SENTENCE_WORDS}
-                max={MAX_SENTENCE_WORDS}
-                value={options.shortSentenceMaxWords}
-                disabled={!options.shortSentencesOnly}
-                onChange={(e) =>
-                  update({
-                    shortSentenceMaxWords: e.target.valueAsNumber,
-                  })
-                }
-                className="w-16 rounded-lg border-2 border-secondary bg-transparent px-2 py-1 text-themed text-xs text-right font-mono focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--palette-background)]"
-              />
-            </div>
-          </div>
-        </div>
-
-        {/* Max turns */}
-        <div className="flex items-center justify-between gap-3">
-          <label htmlFor="narinav-opt-max-turns" className="text-sm text-themed flex-1">
-            Max turns
-          </label>
-          <input
-            id="narinav-opt-max-turns"
-            type="number"
-            min={MIN_TURNS}
-            max={MAX_TURNS}
-            value={options.maxTurns}
-            onChange={(e) => update({ maxTurns: e.target.valueAsNumber })}
-            aria-label={`Maximum turns (${MIN_TURNS} to ${MAX_TURNS})`}
-            className="w-16 rounded-lg border-2 border-secondary bg-transparent px-2 py-1 text-themed text-sm text-right font-mono focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--palette-background)]"
-          />
-        </div>
-
-        {/* Use player's words when possible */}
+        {/* Dev mode */}
         <div className="flex items-center justify-between gap-3">
           <label
-            htmlFor="narinav-opt-player-words"
+            htmlFor="narinav-opt-dev-mode"
             className="text-sm text-themed cursor-pointer flex-1"
           >
-            Use player&apos;s words when possible
+            Dev mode (claude-3-haiku-20240307)
           </label>
           <button
-            id="narinav-opt-player-words"
+            id="narinav-opt-dev-mode"
             type="button"
             role="switch"
-            aria-checked={options.usePlayerWordsWhenPossible}
-            aria-label="Use player's words when possible"
-            onClick={() =>
-              update({ usePlayerWordsWhenPossible: !options.usePlayerWordsWhenPossible })
-            }
+            aria-checked={options.devMode}
+            aria-label="Dev mode"
+            onClick={() => update({ devMode: !options.devMode })}
             className="relative inline-flex h-6 w-10 shrink-0 rounded-full border-2 border-secondary transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--palette-background)]"
             style={{
-              backgroundColor: options.usePlayerWordsWhenPossible
+              backgroundColor: options.devMode
                 ? "var(--palette-primary)"
                 : "color-mix(in srgb, var(--palette-background) 85%, var(--palette-secondary) 15%)",
             }}
@@ -290,16 +156,46 @@ export function NarinavOptionsPanel({
             <span
               className="pointer-events-none inline-block h-5 w-5 rounded-full bg-[var(--palette-background)] shadow ring-0 transition-transform"
               style={{
-                transform: options.usePlayerWordsWhenPossible
+                transform: options.devMode
                   ? "translateX(1rem)"
                   : "translateX(0.125rem)",
               }}
             />
           </button>
         </div>
+
+        {/* Max turns */}
+        <div className="flex items-center justify-between gap-3">
+          <label
+            htmlFor="narinav-opt-max-turns"
+            className="text-sm text-themed flex-1"
+          >
+            Max turns
+          </label>
+          <input
+            id="narinav-opt-max-turns"
+            type="number"
+            min={MIN_TURNS}
+            max={MAX_TURNS_UI}
+            value={options.maxTurns}
+            onChange={(e) => update({ maxTurns: e.target.valueAsNumber })}
+            aria-label={`Maximum turns (${MIN_TURNS} to ${MAX_TURNS_UI})`}
+            className="w-16 rounded-lg border-2 border-secondary bg-transparent px-2 py-1 text-themed text-sm text-right font-mono focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--palette-background)]"
+          />
+        </div>
+
+        {/* Word limits (display only per spec) */}
+        <div className="space-y-1 rounded-lg border border-secondary/50 px-3 py-2 text-xs text-secondary">
+          <p className="font-mono text-themed">
+            Beat words: {options.beatWordMin}–{options.beatWordMax}
+          </p>
+          <p className="font-mono text-themed">
+            Refinement words: {options.refineWordMin}–{options.refineWordMax}
+          </p>
+        </div>
       </div>
     </div>
   );
 }
 
-export { loadOptions, saveOptions, MIN_TURNS, MAX_TURNS, DEFAULT_MAX_TURNS };
+export { loadOptions, saveOptions, MIN_TURNS, MAX_TURNS_UI, DEFAULT_MAX_TURNS };

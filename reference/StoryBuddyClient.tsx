@@ -135,7 +135,20 @@ export default function StoryBuddyClient() {
         <WelcomeOverlay
           gameReady={gameReady}
           embedTargetRef={targetRef}
-          onStart={() => {
+          onStartNewStory={() => {
+            setShowWelcome(false);
+            const interact =
+              (window as {
+                voiceflow?: { chat?: { interact?: (payload: unknown) => void } };
+              }).voiceflow?.chat?.interact;
+            if (typeof interact === "function") {
+              interact({
+                type: "custom_input",
+                payload: { start_signal: "true", is_custom: true },
+              });
+            }
+          }}
+          onContinueStory={() => {
             setShowWelcome(false);
             const interact =
               (window as {
