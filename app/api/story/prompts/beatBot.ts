@@ -31,7 +31,7 @@ Return exactly THREE bare beat options for the player's next turn.
     - at least one matching the tone of the story bible.
   
     Across the three options, vary resolution:
-    - one option that answers the primary thread question,
+    - One option must explicitly answer the primary_thread question within the beat itself,
     - one option that does not resolve any thread,
     - one option that could add a new thread or answers another open thread.
   
