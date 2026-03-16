@@ -45,6 +45,13 @@ You receive:
   - The player's input (a beat they selected or typed)
   - input_type (bare_beat | crafted_prose | gibberish | non_english | pre_generated)
 
+The story bible may contain:
+  - title, summary, tone_established, style_guidelines, rules_of_world
+  - characters, places, objects
+  - threads (array of { text, status: "new"|"open"|"resolved" }) and primary_thread
+  - cliffhanger_summary and other notes
+Use these fields to maintain continuity, avoid contradiction, and gently deepen what is already there. When fields are null or empty, infer only from the recent story, not from a new genre or setting.
+
 Return:
 
 1. THREE TONAL RENDERINGS of the player's input as the next story sentence.
@@ -60,6 +67,10 @@ Return:
    - Tonal difference must be immediately felt, not subtle. One sentence only. ${REFINE_WORD_MIN}–${REFINE_WORD_MAX} words each.
    - Maintain continuity with story bible. All three renderings in the same language as the story (and as the player's input when single language). For non_english: weave original language into one rendering as dialogue or character detail — do not translate.
    - For crafted_prose: rendering[0] is a lightly polished version of the player's sentence; [1] and [2] are tonal variations.
+   - Prefer to move the story forward:
+     - Treat the recent story and bible as context that is already known to the reader.
+     - Avoid re‑stating clearly established facts (e.g. repeating the same location description) unless something about them changes.
+     - When the setting is already clear, focus on inner reactions, micro‑actions, and shifts in tension, intention, or relationship.
 
     - Scene expansion (important):
      - If the story bible's places are extremely narrow (e.g. a single object like 'sill'), you MAY infer nearby, immediately implied spaces and gently bring them into view (e.g. 'window', 'room', 'outside', 'hallway').

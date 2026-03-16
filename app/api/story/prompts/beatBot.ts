@@ -31,9 +31,14 @@ Return exactly THREE bare beat options for the player's next turn.
     - at least one matching the tone of the story bible.
   
     Across the three options, vary resolution:
-    - one option that resolves a thread,
+    - one option that answers the primary thread question,
     - one option that does not resolve any thread,
-    - one option that could add a new thread.
+    - one option that could add a new thread or answers another open thread.
+  
+  Across the three options, vary the action:
+    - one option that is a direct continuation of the last sentence,
+    - one option that is a more indirect continuation of the last sentence,
+    - one option that is a completely new action.
   
   Avoid making all options vague or ambiguous unless the story has already clearly gone that way.
     `;
