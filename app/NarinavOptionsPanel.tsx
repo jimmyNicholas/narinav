@@ -18,6 +18,11 @@ const BEAT_WORD_MAX_UI = 30;
 const REFINE_WORD_MIN_UI = 10;
 const REFINE_WORD_MAX_UI = 40;
 
+/** Player input (custom beat/opening) word limit: min 1, default 30, absolute max 50 */
+export const PLAYER_INPUT_MIN_WORDS = 1;
+export const PLAYER_INPUT_MAX_ABSOLUTE = 50;
+export const DEFAULT_PLAYER_INPUT_MAX_WORDS = 30;
+
 export type NarinavOptions = {
   devMode: boolean;
   maxTurns: number;
@@ -26,6 +31,8 @@ export type NarinavOptions = {
   beatWordMax: number;
   refineWordMin: number;
   refineWordMax: number;
+  /** Max words for player-typed input (opening/custom beat). 1–50, default 30. */
+  playerInputMaxWords: number;
 };
 
 export const defaultNarinavOptions: NarinavOptions = {
@@ -35,6 +42,7 @@ export const defaultNarinavOptions: NarinavOptions = {
   beatWordMax: BEAT_WORD_MAX,
   refineWordMin: REFINE_WORD_MIN,
   refineWordMax: REFINE_WORD_MAX,
+  playerInputMaxWords: DEFAULT_PLAYER_INPUT_MAX_WORDS,
 };
 
 function clampBeatWord(n: number): number {
@@ -46,6 +54,15 @@ function clampRefineWord(n: number): number {
   const num = Number(n);
   if (Number.isNaN(num)) return REFINE_WORD_MIN;
   return Math.min(REFINE_WORD_MAX_UI, Math.max(REFINE_WORD_MIN_UI, Math.round(num)));
+}
+
+function clampPlayerInputMaxWords(n: number): number {
+  const num = Number(n);
+  if (Number.isNaN(num)) return DEFAULT_PLAYER_INPUT_MAX_WORDS;
+  return Math.min(
+    PLAYER_INPUT_MAX_ABSOLUTE,
+    Math.max(PLAYER_INPUT_MIN_WORDS, Math.round(num))
+  );
 }
 
 function loadOptions(): NarinavOptions {
@@ -61,6 +78,9 @@ function loadOptions(): NarinavOptions {
       beatWordMax: clampBeatWord(parsed.beatWordMax ?? BEAT_WORD_MAX),
       refineWordMin: clampRefineWord(parsed.refineWordMin ?? REFINE_WORD_MIN),
       refineWordMax: clampRefineWord(parsed.refineWordMax ?? REFINE_WORD_MAX),
+      playerInputMaxWords: clampPlayerInputMaxWords(
+        parsed.playerInputMaxWords ?? DEFAULT_PLAYER_INPUT_MAX_WORDS
+      ),
     };
   } catch {
     return defaultNarinavOptions;
@@ -111,6 +131,8 @@ export function NarinavOptionsPanel({
       if (typeof next.beatWordMax === "number") next.beatWordMax = clampBeatWord(next.beatWordMax);
       if (typeof next.refineWordMin === "number") next.refineWordMin = clampRefineWord(next.refineWordMin);
       if (typeof next.refineWordMax === "number") next.refineWordMax = clampRefineWord(next.refineWordMax);
+      if (typeof next.playerInputMaxWords === "number")
+        next.playerInputMaxWords = clampPlayerInputMaxWords(next.playerInputMaxWords);
       if (next.beatWordMin > next.beatWordMax) next.beatWordMax = next.beatWordMin;
       if (next.refineWordMin > next.refineWordMax) next.refineWordMax = next.refineWordMin;
       onOptionsChange(next);
@@ -264,6 +286,23 @@ export function NarinavOptionsPanel({
             value={options.refineWordMax}
             onChange={(e) => update({ refineWordMax: e.target.valueAsNumber })}
             aria-label={`Refinement words max (${REFINE_WORD_MIN_UI}–${REFINE_WORD_MAX_UI})`}
+            className="w-14 rounded-lg border-2 border-secondary bg-transparent px-2 py-1 text-themed text-sm text-right font-mono focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          />
+        </div>
+
+        {/* Player input word limit */}
+        <div className="flex items-center justify-between gap-3">
+          <label htmlFor="narinav-opt-player-input-max" className="text-sm text-themed flex-1">
+            Player input limit (words)
+          </label>
+          <input
+            id="narinav-opt-player-input-max"
+            type="number"
+            min={PLAYER_INPUT_MIN_WORDS}
+            max={PLAYER_INPUT_MAX_ABSOLUTE}
+            value={options.playerInputMaxWords}
+            onChange={(e) => update({ playerInputMaxWords: e.target.valueAsNumber })}
+            aria-label={`Player input max words (${PLAYER_INPUT_MIN_WORDS}–${PLAYER_INPUT_MAX_ABSOLUTE})`}
             className="w-14 rounded-lg border-2 border-secondary bg-transparent px-2 py-1 text-themed text-sm text-right font-mono focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           />
         </div>

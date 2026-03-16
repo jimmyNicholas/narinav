@@ -7,25 +7,26 @@ import {
 } from "@/lib/constants";
 import {
   createEmptyStoryBible,
-  type ActiveBotResponse,
+  normalizeStoryBible,
   type ClassifyResponse,
   type FinalStoryResponse,
   type GameMode,
   type StoryBible,
+  type StoryBibleThread,
   type StoryBibleUpdate,
+  type ThreadStatus,
 } from "@/lib/navinavTypes";
 import { createMessage, extractJson } from "./anthropic";
 import {
   inputClassifierUser,
   INPUT_CLASSIFIER_SYSTEM,
   beatBotUser,
-  BEAT_BOT_SYSTEM,
+  getBeatBotSystem,
+  type BeatBotMode,
   refinementBotUser,
-  REFINEMENT_BOT_SYSTEM,
+  getRefinementSystem,
   storyBibleUpdateUser,
   STORY_BIBLE_UPDATE_SYSTEM,
-  closingBotUser,
-  CLOSING_BOT_SYSTEM,
   finalStoryBotUser,
   FINAL_STORY_BOT_SYSTEM,
 } from "./prompts";
@@ -74,48 +75,6 @@ function parseClassify(text: string): ClassifyResponse | null {
   }
 }
 
-function parseActiveBotResponse(text: string): ActiveBotResponse | null {
-  try {
-    const json = extractJson(text);
-    const o = JSON.parse(json) as Record<string, unknown>;
-    const renderings = ensureTriple(
-      Array.isArray(o.renderings) ? o.renderings : [],
-      ""
-    );
-    const rendering_tones = ensureTriple(
-      Array.isArray(o.rendering_tones) ? o.rendering_tones : [],
-      ""
-    );
-    const next_beats = ensureTriple(
-      Array.isArray(o.next_beats) ? o.next_beats : [],
-      ""
-    );
-    const story_bible_update =
-      o.story_bible_update != null && typeof o.story_bible_update === "object"
-        ? (o.story_bible_update as ActiveBotResponse["story_bible_update"])
-        : null;
-    return {
-      renderings,
-      rendering_tones,
-      next_beats,
-      natural_ending_detected: Boolean(o.natural_ending_detected),
-      story_bible_update,
-      moral:
-        typeof o.moral === "string"
-          ? o.moral
-          : o.moral === null
-            ? null
-            : undefined,
-      chapter_bible:
-        o.chapter_bible != null && typeof o.chapter_bible === "object"
-          ? (o.chapter_bible as StoryBible)
-          : undefined,
-    };
-  } catch {
-    return null;
-  }
-}
-
 function parseFinalStoryResponse(text: string): FinalStoryResponse | null {
   try {
     const json = extractJson(text);
@@ -130,13 +89,45 @@ function parseFinalStoryResponse(text: string): FinalStoryResponse | null {
   }
 }
 
+const THREAD_STATUSES: ThreadStatus[] = ["new", "open", "resolved"];
+
 function parseStoryBibleUpdateResponse(text: string): StoryBibleUpdate | null {
   try {
     const json = extractJson(text);
     const o = JSON.parse(json) as Record<string, unknown>;
-    const update = o.story_bible_update;
-    if (update == null || typeof update !== "object") return null;
-    return update as StoryBibleUpdate;
+    const raw = o.story_bible_update;
+    if (raw == null || typeof raw !== "object") return null;
+    const update = raw as Record<string, unknown>;
+    const out: StoryBibleUpdate = {};
+
+    if (update.title !== undefined) out.title = update.title as string | null;
+    if (update.summary !== undefined) out.summary = update.summary as string | null;
+    if (update.tone_established !== undefined)
+      out.tone_established = update.tone_established as string | null;
+    if (update.cliffhanger_summary !== undefined)
+      out.cliffhanger_summary = update.cliffhanger_summary as string | null;
+    if (update.primary_thread !== undefined)
+      out.primary_thread = update.primary_thread as string | null;
+
+    if (Array.isArray(update.characters)) out.characters = update.characters as StoryBible["characters"];
+    if (Array.isArray(update.places)) out.places = update.places as StoryBible["places"];
+    if (Array.isArray(update.objects)) out.objects = update.objects as StoryBible["objects"];
+
+    if (Array.isArray(update.threads)) {
+      const threads: StoryBibleThread[] = [];
+      for (const t of update.threads) {
+        if (t == null || typeof t !== "object") continue;
+        const obj = t as Record<string, unknown>;
+        const text = typeof obj.text === "string" ? obj.text.trim() : "";
+        const status = THREAD_STATUSES.includes(obj.status as ThreadStatus)
+          ? (obj.status as ThreadStatus)
+          : "open";
+        if (text) threads.push({ text, status });
+      }
+      if (threads.length > 0) out.threads = threads;
+    }
+
+    return out;
   } catch {
     return null;
   }
@@ -156,9 +147,14 @@ function parseBeatBotResponse(text: string): { next_beats: [string, string, stri
   }
 }
 
-function parseRefinementBotResponse(text: string): {
+function parseRefinementBotResponse(
+  text: string,
+  mode?: "ending" | "chapter"
+): {
   renderings: [string, string, string];
   natural_ending_detected: boolean;
+  moral?: string | null;
+  chapter_bible?: StoryBible | null;
 } | null {
   try {
     const json = extractJson(text);
@@ -167,10 +163,25 @@ function parseRefinementBotResponse(text: string): {
       Array.isArray(o.renderings) ? o.renderings : [],
       ""
     );
-    return {
+    const out: {
+      renderings: [string, string, string];
+      natural_ending_detected: boolean;
+      moral?: string | null;
+      chapter_bible?: StoryBible | null;
+    } = {
       renderings,
       natural_ending_detected: Boolean(o.natural_ending_detected),
     };
+    if (mode === "ending")
+      out.moral =
+        typeof o.moral === "string" ? o.moral : o.moral === null ? null : undefined;
+    if (
+      mode === "chapter" &&
+      o.chapter_bible != null &&
+      typeof o.chapter_bible === "object"
+    )
+      out.chapter_bible = normalizeStoryBible(o.chapter_bible as Partial<StoryBible>);
+    return out;
   } catch {
     return null;
   }
@@ -194,6 +205,7 @@ export async function POST(request: Request) {
     story_bible?: StoryBible;
     current_bible?: StoryBible;
     latest_entry?: string;
+    recent_entries?: string[];
     total_turn_count?: number;
     mode?: GameMode;
     path_turn_limit?: number | null;
@@ -253,6 +265,14 @@ export async function POST(request: Request) {
         : createEmptyStoryBible();
     const totalTurnCount = Number(body.total_turn_count) || 0;
     const mode = (body.mode as GameMode) ?? "open";
+    // Use "open" (evocative hooks) only for the very first line (turn 0); otherwise continue.
+    const effectiveMode: BeatBotMode =
+      mode === "open" && totalTurnCount > 0
+        ? "continue"
+        : mode === "open" || mode === "continue" || mode === "ending" || mode === "chapter"
+          ? (mode as BeatBotMode)
+          : "open";
+    const beatMode = effectiveMode;
     const narrativePosition =
       maxTurns > 0 ? Math.min(1, totalTurnCount / maxTurns) : 0;
     const recentStory = getRecentStory(storySoFar, totalTurnCount);
@@ -267,7 +287,7 @@ export async function POST(request: Request) {
       const text = await createMessage({
         apiKey,
         model: getModel(devMode, false),
-        system: BEAT_BOT_SYSTEM,
+        system: getBeatBotSystem(beatMode),
         messages: [{ role: "user", content: userContent }],
         maxTokens: 512,
       });
@@ -298,6 +318,13 @@ export async function POST(request: Request) {
     const inputType = String(body.input_type ?? "pre_generated");
     const mode = (body.mode as GameMode) ?? "open";
     const totalTurnCount = Number(body.total_turn_count) || 0;
+    const pathTurnLimit = body.path_turn_limit ?? null;
+    const turnsSinceDecision = Number(body.turns_since_decision) ?? 0;
+    const turnsRemaining =
+      pathTurnLimit !== null ? pathTurnLimit - turnsSinceDecision : null;
+    const endingPressure = getEndingPressure(turnsRemaining);
+    const closeType =
+      mode === "chapter" ? "chapter" : mode === "ending" ? "story" : undefined;
     const recentStory = getRecentStory(storySoFar, totalTurnCount);
     const storyBibleStr = JSON.stringify(storyBible, null, 0);
     if (!cleanedInput) {
@@ -313,15 +340,30 @@ export async function POST(request: Request) {
         mode,
         inputType,
         cleanedInput,
+        ...(mode === "ending" || mode === "chapter"
+          ? {
+              turnsRemaining: turnsRemaining ?? 0,
+              endingPressure,
+              closeType: closeType!,
+            }
+          : {}),
       });
+      const system = getRefinementSystem(
+        mode,
+        mode === "ending" || mode === "chapter" ? endingPressure : undefined,
+        closeType ?? undefined
+      );
       const text = await createMessage({
         apiKey,
         model: getModel(devMode, false),
-        system: REFINEMENT_BOT_SYSTEM,
+        system,
         messages: [{ role: "user", content: userContent }],
         maxTokens: 2048,
       });
-      const result = parseRefinementBotResponse(text);
+      const result = parseRefinementBotResponse(
+        text,
+        mode === "ending" ? "ending" : mode === "chapter" ? "chapter" : undefined
+      );
       if (!result) {
         return NextResponse.json(
           {
@@ -339,96 +381,33 @@ export async function POST(request: Request) {
     }
   }
 
-  if (body.action === "activeBot") {
-    const cleanedInput = String(body.cleaned_input ?? "").trim();
-    const inputType = String(body.input_type ?? "pre_generated");
-    const storySoFar = Array.isArray(body.story_so_far)
-      ? body.story_so_far
-      : [];
-    const storyBible: StoryBible =
-      body.story_bible && typeof body.story_bible === "object"
-        ? body.story_bible
-        : createEmptyStoryBible();
-    const totalTurnCount = Number(body.total_turn_count) || 0;
-    const mode = (body.mode as GameMode) ?? "open";
-    const pathTurnLimit = body.path_turn_limit ?? null;
-    const turnsSinceDecision = Number(body.turns_since_decision) || 0;
-
-    const turnsRemaining =
-      pathTurnLimit !== null ? pathTurnLimit - turnsSinceDecision : null;
-    const endingPressure = getEndingPressure(turnsRemaining);
-    const recentStory = getRecentStory(storySoFar, totalTurnCount);
-    const storyBibleStr = JSON.stringify(storyBible, null, 0);
-
-    if (mode === "open" || mode === "continue") {
-      return NextResponse.json(
-        {
-          error:
-            "For open/continue use beatBot and refinementBot. activeBot is for ending or chapter only.",
-        },
-        { status: 400 }
-      );
-    }
-
-    if (mode === "ending" || mode === "chapter") {
-      const closeType = mode === "chapter" ? "chapter" : "story";
-      try {
-        const userContent = closingBotUser({
-          storyBible: storyBibleStr,
-          recentStory,
-          turnsRemaining: turnsRemaining ?? 0,
-          endingPressure,
-          closeType,
-          inputType,
-          cleanedInput,
-        });
-        const text = await createMessage({
-          apiKey,
-          model: getModel(devMode, false),
-          system: CLOSING_BOT_SYSTEM,
-          messages: [{ role: "user", content: userContent }],
-          maxTokens: 2048,
-        });
-        const result = parseActiveBotResponse(text);
-        if (!result) {
-          return NextResponse.json(
-            {
-              error: "Could not parse Closing Bot response",
-              raw: text.slice(0, 500),
-            },
-            { status: 502 }
-          );
-        }
-        return NextResponse.json(result);
-      } catch (err) {
-        const message =
-          err instanceof Error ? err.message : "Anthropic API request failed";
-        return NextResponse.json({ error: message }, { status: 502 });
-      }
-    }
-
-    return NextResponse.json(
-      { error: "Unknown mode for activeBot" },
-      { status: 400 }
-    );
-  }
-
   if (body.action === "storyBibleUpdate") {
-    const currentBible: StoryBible =
+    const rawBible =
       body.current_bible && typeof body.current_bible === "object"
         ? body.current_bible
-        : createEmptyStoryBible();
-    const latestEntry = String(body.latest_entry ?? "").trim();
-    if (!latestEntry) {
+        : {};
+    const currentBible = normalizeStoryBible(rawBible as Partial<StoryBible>);
+
+    const recentEntriesRaw = Array.isArray(body.recent_entries)
+      ? body.recent_entries
+      : body.latest_entry !== undefined
+        ? [String(body.latest_entry).trim()]
+        : [];
+    const recentEntries = recentEntriesRaw
+      .map((e: unknown) => String(e).trim())
+      .filter(Boolean)
+      .slice(-5);
+    if (recentEntries.length === 0) {
       return NextResponse.json(
-        { error: "storyBibleUpdate requires latest_entry" },
+        { error: "storyBibleUpdate requires recent_entries (or latest_entry)" },
         { status: 400 }
       );
     }
+
     try {
       const userContent = storyBibleUpdateUser({
         currentBible: JSON.stringify(currentBible, null, 0),
-        latestEntry,
+        recentEntries,
       });
       const text = await createMessage({
         apiKey,
@@ -503,7 +482,7 @@ export async function POST(request: Request) {
 
   return NextResponse.json(
     {
-      error: "Unknown action. Use classify, beatBot, refinementBot, activeBot (ending/chapter), storyBibleUpdate, or finalStory.",
+      error: "Unknown action. Use classify, beatBot, refinementBot, storyBibleUpdate, or finalStory.",
     },
     { status: 400 }
   );

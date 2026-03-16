@@ -1,6 +1,7 @@
 "use client";
 
-import React from "react";
+import React, { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Panel,
   MessageBlock,
@@ -50,6 +51,7 @@ export function FinalStoryPanel({ finalTitle, finalStory }: FinalStoryPanelProps
 type StorySoFarPanelProps = {
   storySoFar: string;
   turnCount?: number;
+  maxTurns?: number;
   selectedBeat?: string | null;
   onRemoveBeat?: () => void;
   canRemoveBeat?: boolean;
@@ -58,10 +60,19 @@ type StorySoFarPanelProps = {
 export function StorySoFarPanel({
   storySoFar,
   turnCount,
+  maxTurns,
   selectedBeat,
   onRemoveBeat,
   canRemoveBeat,
 }: StorySoFarPanelProps) {
+  const hasTurnInfo = turnCount != null && turnCount > 0 && maxTurns != null && maxTurns > 0;
+  const turnLabel =
+    hasTurnInfo && turnCount != null && maxTurns != null
+      ? `Turn ${turnCount} of ${maxTurns}`
+      : turnCount != null && turnCount > 0
+        ? `Turn ${turnCount}`
+        : "—";
+
   return (
     <section
       className="border-[3px] border-primary rounded-3xl p-6 flex flex-col min-h-[500px] max-h-[560px] overflow-hidden"
@@ -74,9 +85,9 @@ export function StorySoFarPanel({
         </h2>
         <span
           className="font-mono text-secondary text-sm shrink-0"
-          aria-label={turnCount != null ? `Turn ${turnCount}` : undefined}
+          aria-label={turnLabel !== "—" ? turnLabel : undefined}
         >
-          {turnCount != null && turnCount > 0 ? `Turn ${turnCount}` : "—"}
+          {turnLabel}
         </span>
       </div>
       <div
@@ -119,7 +130,9 @@ type OptionsPanelProps = {
   onCustomInputChange: (value: string) => void;
   onCustomSubmit: () => void;
   onChoiceClick: (index: number, choiceText: string) => void;
-  customInputRef: React.RefObject<HTMLInputElement | null>;
+  customInputRef: React.RefObject<HTMLTextAreaElement | null>;
+  onRefreshBeats?: () => void;
+  beatRefreshesLeft?: number;
 };
 
 export function OptionsPanel({
@@ -131,6 +144,8 @@ export function OptionsPanel({
   onCustomSubmit,
   onChoiceClick,
   customInputRef,
+  onRefreshBeats,
+  beatRefreshesLeft = 0,
 }: OptionsPanelProps) {
   return (
     <section
@@ -157,25 +172,37 @@ export function OptionsPanel({
         </div>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-1 gap-3 flex-1 min-h-0 auto-rows-fr">
-        {[0, 1, 2].map((i) => {
-          const choice = choicesList[i] ?? "";
-          const hasChoice = choice.length > 0;
-          return (
-            <button
-              key={`choice-${i}-${choice.slice(0, 48)}`}
-              type="button"
-              disabled={!hasChoice || isWaitingForPayload}
-              className="h-full w-full text-left px-4 py-3 border-2 border-primary rounded-2xl text-themed text-base leading-relaxed font-mono transition-all duration-200 motion-reduce:transition-none enabled:cursor-pointer hover:bg-(--palette-primary)/14 hover:shadow-md hover:shadow-black/10 hover:-translate-y-0.5 motion-reduce:hover:translate-y-0 hover:border-primary active:translate-y-0 active:scale-[0.99] motion-reduce:active:scale-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-(--palette-background) disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:shadow-none disabled:hover:translate-y-0 disabled:active:scale-100"
-              style={{ backgroundColor: getCardBg() }}
-              onClick={() =>
-                hasChoice && !isWaitingForPayload && onChoiceClick(i, choice)
-              }
-            >
-              {hasChoice ? choice : "—"}
-            </button>
-          );
-        })}
+      <div className="flex flex-col sm:flex-row items-start gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-1 gap-3 flex-1 min-h-0 auto-rows-fr w-full">
+          {[0, 1, 2].map((i) => {
+            const choice = choicesList[i] ?? "";
+            const hasChoice = choice.length > 0;
+            return (
+              <button
+                key={`choice-${i}-${choice.slice(0, 48)}`}
+                type="button"
+                disabled={!hasChoice || isWaitingForPayload}
+                className="h-full w-full text-left px-4 py-3 border-2 border-primary rounded-2xl text-themed text-base leading-relaxed font-mono transition-all duration-200 motion-reduce:transition-none enabled:cursor-pointer hover:bg-(--palette-primary)/14 hover:shadow-md hover:shadow-black/10 hover:-translate-y-0.5 motion-reduce:hover:translate-y-0 hover:border-primary active:translate-y-0 active:scale-[0.99] motion-reduce:active:scale-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-(--palette-background) disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:shadow-none disabled:hover:translate-y-0 disabled:active:scale-100"
+                style={{ backgroundColor: getCardBg() }}
+                onClick={() =>
+                  hasChoice && !isWaitingForPayload && onChoiceClick(i, choice)
+                }
+              >
+                {hasChoice ? choice : "—"}
+              </button>
+            );
+          })}
+        </div>
+        {onRefreshBeats != null && beatRefreshesLeft > 0 ? (
+          <SecondaryButton
+            onClick={onRefreshBeats}
+            disabled={isWaitingForPayload}
+            aria-label={`Refresh choices (${beatRefreshesLeft} left)`}
+            className="shrink-0 self-center"
+          >
+            Refresh ({beatRefreshesLeft})
+          </SecondaryButton>
+        ) : null}
       </div>
 
       {allowCustomInput ? (
@@ -183,16 +210,21 @@ export function OptionsPanel({
           <label className="sr-only" htmlFor="narinav-custom-input">
             Or type your own action
           </label>
-          <input
+          <textarea
             id="narinav-custom-input"
             ref={customInputRef}
-            type="text"
             value={customInputValue}
             onChange={(e) => onCustomInputChange(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && onCustomSubmit()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                onCustomSubmit();
+              }
+            }}
             disabled={isWaitingForPayload}
             placeholder="Or type your own action..."
-            className="w-full px-3 py-2 border-2 border-secondary rounded-2xl text-themed text-base font-mono bg-transparent placeholder:text-secondary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-(--palette-background)"
+            rows={4}
+            className="w-full min-h-24 px-3 py-2 border-2 border-secondary rounded-2xl text-themed text-base font-mono bg-transparent placeholder:text-secondary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-(--palette-background) resize-y"
           />
           <PrimaryButton
             onClick={onCustomSubmit}
@@ -214,6 +246,61 @@ export function StoryBuddyConnecting() {
       className="min-h-[400px] border-2 border-secondary rounded-3xl p-8 flex flex-col items-center justify-center text-center space-y-4"
       style={{ backgroundColor: PANEL_BG.subtle }}
     >
+      <div className="inline-flex items-center justify-center rounded-full border-2 border-primary/70 px-4 py-2">
+        <span className="mr-3 inline-block h-8 w-8 rounded-full border-4 border-secondary/60 border-t-primary animate-spin motion-reduce:animate-none" />
+        <span className="font-mono text-themed text-base">
+          Connecting to Story Buddy…
+        </span>
+      </div>
+      <p className="text-secondary text-sm max-w-xl">
+        Setting up your story space. This usually takes just a moment.
+      </p>
+    </div>
+  );
+}
+
+type LoadingOrErrorPanelProps = {
+  errorMessage: string | null;
+  onTryAgain: () => void;
+};
+
+/** Same space as loading: shows spinner or error + Try again. */
+export function LoadingOrErrorPanel({
+  errorMessage,
+  onTryAgain,
+}: LoadingOrErrorPanelProps) {
+  const containerClass =
+    "min-h-[400px] border-2 border-secondary rounded-3xl p-8 flex flex-col items-center justify-center text-center space-y-4";
+  const containerStyle = { backgroundColor: PANEL_BG.subtle };
+
+  if (errorMessage) {
+    return (
+      <div className={containerClass} style={containerStyle}>
+        <h2 className="font-mono font-bold text-red-600 dark:text-red-400 text-lg">
+          Something went wrong
+        </h2>
+        <p className="text-themed text-sm font-mono max-w-xl whitespace-pre-wrap">
+          {errorMessage}
+        </p>
+        <button
+          type="button"
+          onClick={onTryAgain}
+          className="rounded-2xl border-2 px-4 py-2 font-mono text-base text-themed focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          style={{
+            backgroundColor:
+              "color-mix(in srgb, #4b9b6a 35%, var(--palette-background) 65%)",
+            borderColor:
+              "color-mix(in srgb, #4b9b6a 80%, var(--palette-primary) 20%)",
+          }}
+        >
+          Try again
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className={containerClass} style={containerStyle}>
       <div className="inline-flex items-center justify-center rounded-full border-2 border-primary/70 px-4 py-2">
         <span className="mr-3 inline-block h-8 w-8 rounded-full border-4 border-secondary/60 border-t-primary animate-spin motion-reduce:animate-none" />
         <span className="font-mono text-themed text-base">
@@ -338,13 +425,68 @@ export function WelcomeOverlay({
   );
 }
 
-const OPENING_BEATS = [
-  "a strange meeting",
-  "an unexpected letter",
-  "waking up somewhere unfamiliar",
-] as const;
+type ErrorOverlayProps = {
+  message: string;
+  onTryAgain: () => void;
+};
+
+export function ErrorOverlay({ message, onTryAgain }: ErrorOverlayProps) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
+  const overlay = (
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+      aria-modal
+      aria-labelledby="error-overlay-title"
+      role="alertdialog"
+    >
+      <div
+        className="absolute inset-0 z-0 bg-black/50"
+        onClick={onTryAgain}
+        onKeyDown={(e) => e.key === "Escape" && onTryAgain()}
+        aria-hidden
+      />
+      <div
+        className="relative z-10 rounded-3xl border-2 border-red-500/80 px-6 py-5 max-w-md shadow-xl"
+        style={{ backgroundColor: PANEL_BG.default }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2
+          id="error-overlay-title"
+          className="font-mono font-bold text-red-600 dark:text-red-400 text-lg mb-2"
+        >
+          Something went wrong
+        </h2>
+        <p className="text-themed text-sm font-mono mb-4 whitespace-pre-wrap">
+          {message}
+        </p>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onTryAgain();
+          }}
+          className="rounded-2xl border-2 px-4 py-2 font-mono text-base text-themed focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          style={{
+            backgroundColor:
+              "color-mix(in srgb, #4b9b6a 35%, var(--palette-background) 65%)",
+            borderColor:
+              "color-mix(in srgb, #4b9b6a 80%, var(--palette-primary) 20%)",
+          }}
+        >
+          Try again
+        </button>
+      </div>
+    </div>
+  );
+
+  if (!mounted || typeof document === "undefined") return null;
+  return createPortal(overlay, document.body);
+}
 
 type OpeningPromptProps = {
+  choicesList: [string, string, string];
   onSelectBeat: (beat: string) => void;
   onWriteYourOwn: () => void;
   customInputValue: string;
@@ -357,6 +499,7 @@ type OpeningPromptProps = {
 };
 
 export function OpeningPrompt({
+  choicesList,
   onSelectBeat,
   customInputValue,
   onCustomInputChange,
@@ -379,9 +522,9 @@ export function OpeningPrompt({
         to get started:
       </p>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        {OPENING_BEATS.map((beat) => (
+        {choicesList.map((beat, i) => (
           <button
-            key={beat}
+            key={beat ? `beat-${i}-${beat.slice(0, 20)}` : `beat-${i}`}
             type="button"
             onClick={() => onSelectBeat(beat)}
             disabled={isSubmitting}
@@ -494,7 +637,7 @@ export function RefinementPanel({
               value={editableValue}
               onChange={(e) => onEditableChange(e.target.value)}
               disabled={isSubmitting}
-              rows={2}
+              rows={5}
               className="w-full px-3 py-2 border-2 border-secondary rounded-2xl text-themed text-sm font-mono bg-transparent resize-none focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
               placeholder="Edit your sentence…"
             />
