@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import {
   CONTEXT_SWITCH_TURN,
   DEV_MODE_MODEL,
+  OPENING_TURNS,
   PRODUCTION_FINAL_STORY_MODEL,
   PRODUCTION_GAME_MODEL,
 } from "@/lib/constants";
@@ -26,6 +27,7 @@ import {
   refinementBotUser,
   getRefinementSystem,
   storyBibleUpdateUser,
+  STORY_BIBLE_UPDATE_SYSTEM_OPENING,
   STORY_BIBLE_UPDATE_SYSTEM,
   finalStoryBotUser,
   FINAL_STORY_BOT_SYSTEM,
@@ -91,13 +93,24 @@ function parseFinalStoryResponse(text: string): FinalStoryResponse | null {
 
 const THREAD_STATUSES: ThreadStatus[] = ["new", "open", "resolved"];
 
+const STORY_BIBLE_UPDATE_KEYS = new Set([
+  "title", "summary", "tone_established", "meta", "style_guidelines",
+  "rules_of_world", "characters", "places", "objects", "threads",
+  "primary_thread", "cliffhanger_summary",
+]);
+
 function parseStoryBibleUpdateResponse(text: string): StoryBibleUpdate | null {
   try {
     const json = extractJson(text);
     const o = JSON.parse(json) as Record<string, unknown>;
-    const raw = o.story_bible_update;
-    if (raw == null || typeof raw !== "object") return null;
-    const update = raw as Record<string, unknown>;
+    let update: Record<string, unknown>;
+    if (o.story_bible_update != null && typeof o.story_bible_update === "object") {
+      update = o.story_bible_update as Record<string, unknown>;
+    } else if (Object.keys(o).some((k) => STORY_BIBLE_UPDATE_KEYS.has(k))) {
+      update = o;
+    } else {
+      return null;
+    }
     const out: StoryBibleUpdate = {};
 
     if (update.title !== undefined) out.title = update.title as string | null;
@@ -265,13 +278,13 @@ export async function POST(request: Request) {
         : createEmptyStoryBible();
     const totalTurnCount = Number(body.total_turn_count) || 0;
     const mode = (body.mode as GameMode) ?? "open";
-    // Use "open" (evocative hooks) only for the very first line (turn 0); otherwise continue.
+    // Open mode runs for turns 0–2 (opening zone); then continue. Ending/chapter pass through.
     const effectiveMode: BeatBotMode =
-      mode === "open" && totalTurnCount > 0
-        ? "continue"
-        : mode === "open" || mode === "continue" || mode === "ending" || mode === "chapter"
-          ? (mode as BeatBotMode)
-          : "open";
+      mode === "ending" || mode === "chapter"
+        ? (mode as BeatBotMode)
+        : totalTurnCount < OPENING_TURNS
+          ? "open"
+          : "continue";
     const beatMode = effectiveMode;
     const narrativePosition =
       maxTurns > 0 ? Math.min(1, totalTurnCount / maxTurns) : 0;
@@ -405,6 +418,17 @@ export async function POST(request: Request) {
     }
 
     try {
+      const mode =
+        body.mode === "open" ||
+        body.mode === "continue" ||
+        body.mode === "ending" ||
+        body.mode === "chapter"
+          ? (body.mode as BeatBotMode)
+          : "continue";
+      const system =
+        mode === "open"
+          ? STORY_BIBLE_UPDATE_SYSTEM_OPENING
+          : STORY_BIBLE_UPDATE_SYSTEM;
       const userContent = storyBibleUpdateUser({
         currentBible: JSON.stringify(currentBible, null, 0),
         recentEntries,
@@ -412,7 +436,7 @@ export async function POST(request: Request) {
       const text = await createMessage({
         apiKey,
         model: getModel(devMode, false),
-        system: STORY_BIBLE_UPDATE_SYSTEM,
+        system,
         messages: [{ role: "user", content: userContent }],
         maxTokens: 1024,
       });

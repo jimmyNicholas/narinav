@@ -1,60 +1,119 @@
 /**
  * Beat Bot: suggests the next three things the player can do.
  * Base prompt + mode-specific blocks (open | continue | ending | chapter).
+ *
+ * OPEN mode runs for turns 0–2 (the opening zone).
+ * This is controlled in route.ts via effectiveMode, not in the prompt.
  */
 
 import { BEAT_WORD_MIN, BEAT_WORD_MAX } from "@/lib/constants";
 
-const BEAT_BOT_BASE = `You are the Beat Bot for Navinav. You suggest the next three things the player can do in the story.
+// ---- Base ----
+
+const BEAT_BOT_BASE = `You are the Beat Bot for Navinav. Suggest the next three things the player can do.
 
 You receive:
-  - Recent story (last 3 sentences, or full story if early game)
-  - Story bible (narrative memory)
-  - narrative_position (0.0 = start, 1.0 = end)
+  - recent_story: last 3 sentences (or full story if early game)
+  - story_bible: narrative memory
+  - narrative_position: 0.0 = start, 1.0 = end
 
-Return exactly THREE bare beat options for the player's next turn.
+Return exactly THREE bare beat options.
   - Short action phrases — not full sentences. ${BEAT_WORD_MIN}–${BEAT_WORD_MAX} words each.`;
 
-  const BEAT_BOT_OPEN = `
-  The beats should start the story — evocative opening hooks, not continuations.
-  Offer a mix of tones across the three options:
-    - at least one lighter or hopeful option,
-    - at least one neutral or curious option,
-  Keep the options grounded in everyday or gently strange moments, not constant danger or horror.
-    - e.g. 'A friend calls your name', 'Sunlight spills through the window', 'You notice a door slightly ajar', 'A distant laugh echoes', 'The wind changes direction'`;
-  
-  const BEAT_BOT_CONTINUE = `
-  The next beats should be natural continuations of the current story: immediate, in-world actions that follow from the last sentence. Ground options in the scene and characters.
-  Across the three options, vary the emotional tone:
-    - one lighter/optimistic or comforting action,
-    - one neutral/practical or curious action,
-    - at least one matching the tone of the story bible.
-  
-    Across the three options, vary resolution:
-    - One option must explicitly answer the primary_thread question within the beat itself,
-    - one option that does not resolve any thread,
-    - one option that could add a new thread or answers another open thread.
-  
-  Across the three options, vary the action:
-    - one option that is a direct continuation of the last sentence,
-    - one option that is a more indirect continuation of the last sentence,
-    - one option that is a completely new action.
-  
-  Avoid making all options vague or ambiguous unless the story has already clearly gone that way.
-    `;
+// ---- Open (turns 0–2) ----
+// Route passes mode="open" for totalTurnCount <= 2.
+// Goal: establish atmosphere without locking in world details.
+
+const BEAT_BOT_OPEN = `
+
+The story is in its opening phase. Offer evocative hooks — not continuations.
+
+Spatial rule: infer 1–2 spaces implied by confirmed places in the bible.
+  Use these as a soft boundary. If no places confirmed, keep beats sensation-only.
+  Do NOT commit to a specific location, name a room, or imply a fixed setting.
+
+Character rule: do NOT assume any character is present unless the bible confirms one.
+  When there are no confirmed characters, avoid third-person character phrasing:
+    - Do not use "he", "she", "they", "someone", "a man", "a woman", "a figure",
+      "his", "her", or "their".
+  In the absence of confirmed characters, describe only the environment,
+  sensations, or abstract shifts — no people at all.
+
+Thread rule: even if the story_bible contains threads or a primary_thread
+  (e.g. "What is the source of the melody?"), do NOT answer, investigate, or
+  move toward resolving them in open mode. You may notice them, but beats must
+  not search, follow, or find the source of anything.
+
+Vary the three beats across:
+  - one sensation or perception (something noticed or felt)
+  - one internal or memory (something remembered or realised)
+  - one micro-action (something small done — no assumed place or person)
+    At least one beat must clearly describe a small physical action involving
+    the body or hands (e.g. reach, touch, pick up, set down, turn, step). Avoid
+    purely atmospheric verbs like "lingers", "tugs", or "drawn" in this beat.
+
+Vary tone across:
+  - one lighter or hopeful
+  - one neutral or curious
+  - one carrying faint tension, strangeness, or dry humour
+
+Examples of the right register:
+  'A name surfaces, half-remembered'
+  'Something nearby has shifted'
+  'An old feeling returns without warning'
+  'A sound you can't quite place'
+  'Your hand moves before you decide to'`;
+
+// ---- Continue ----
+
+const BEAT_BOT_CONTINUE = `
+
+Beats should be immediate, in-world continuations grounded in the scene and characters.
+
+Before generating, infer 1–2 spaces immediately implied by confirmed places in the bible.
+Use these as the spatial boundary — beats should stay within or just beyond them.
+
+Vary tone across the three beats:
+  - one lighter, optimistic, or comforting
+  - one neutral, practical, or curious
+  - one matching the current tone of the story bible
+
+Vary resolution across the three beats:
+  - one that directly answers the primary_thread
+  - one that introduces or deepens a different thread
+  - one that does not engage any thread
+
+Vary action across the three beats:
+  - one direct continuation of the last sentence
+  - one indirect or oblique continuation
+  - one that opens a new direction entirely
+
+Avoid vague or ambiguous options unless the story has already gone that way.`;
+
+// ---- Ending ----
 
 const BEAT_BOT_ENDING = `
-The beats should push toward a satisfying close: conclusive, resolution-oriented options. Ground in the scene and characters.
-  - e.g. 'ask him to step aside', 'meet his eyes and hold your ground', 'turn and walk away'`;
+
+Beats should push toward a satisfying close. Ground in the scene and characters.
+Offer conclusive, resolution-oriented actions — no new threads.
+  e.g. 'ask him to step aside', 'meet her eyes and hold your ground', 'turn and walk away'`;
+
+// ---- Chapter ----
 
 const BEAT_BOT_CHAPTER = `
-The beats should build toward a compelling chapter break: tension, stakes, no resolution. Ground in the scene and characters.
-  - e.g. 'step closer', 'demand an answer', 'back away slowly'`;
+
+Beats should build toward a compelling chapter break. Ground in the scene and characters.
+Heighten tension and stakes — do NOT resolve anything.
+  e.g. 'step closer', 'demand an answer', 'back away slowly'`;
+
+// ---- JSON tail ----
 
 const JSON_TAIL = `
 
 Return JSON only. No commentary.
 { "next_beats": ["...", "...", "..."] }`;
+
+// ---- Exports ----
 
 export type BeatBotMode = "open" | "continue" | "ending" | "chapter";
 
@@ -76,8 +135,8 @@ export function beatBotUser(params: {
   narrativePosition: number;
   mode: string;
 }): string {
-  return `Story bible: ${params.storyBible}
-Recent story: ${params.recentStory}
+  return `story_bible: ${params.storyBible}
+recent_story: ${params.recentStory}
 narrative_position: ${params.narrativePosition}
 mode: ${params.mode}`;
 }

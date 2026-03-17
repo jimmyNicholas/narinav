@@ -1,39 +1,70 @@
 /**
- * Story Bible updater: produces a delta to apply to the story bible
- * given the last 5 story entries and current bible.
+ * Story Bible updater: produces a delta to apply to the story bible.
+ *
+ * Two system prompts:
+ *   STORY_BIBLE_UPDATE_SYSTEM_OPENING — turns 0–2, records facts only, no threads
+ *   STORY_BIBLE_UPDATE_SYSTEM         — turn 3+, full thread and world tracking
+ *
+ * Selection is handled in route.ts based on mode === "open".
  */
 
-export const STORY_BIBLE_UPDATE_SYSTEM = `You are the Story Bible updater for Navinav, a collaborative storytelling game.
+// ---- Opening phase (turns 0–2) ----
+// Minimal. Records only what is concretely present. No threads, no inference.
+
+export const STORY_BIBLE_UPDATE_SYSTEM_OPENING = `You are the Story Bible updater for Navinav. The story is in its opening phase.
+
+Record ONLY what is concretely established in the entries:
+  - places: only if a specific location is clearly named or described
+  - tone_established: if the overall mood is evident
+  - objects: only if directly interacted with
+  - characters: only if explicitly introduced by name or clear role
+
+Do NOT create threads. Do NOT set primary_thread. Do NOT infer mysteries from sensory detail.
+
+Return JSON only. Same schema as the full updater. Omit unchanged keys.`;
+
+// ---- Full updater (turn 3+) ----
+
+export const STORY_BIBLE_UPDATE_SYSTEM = `You are the Story Bible updater for Navinav.
 
 You receive:
-  - The current story bible (narrative memory: meta, style, rules_of_world, characters, places, objects, tone, threads with status, primary_thread)
-  - The last 5 story entries (oldest to newest): recent sentences the player has committed
+  - current_bible: the current narrative memory
+  - recent_entries: last 5 committed sentences (oldest to newest)
 
-Your job: produce a DELTA only — the updates to apply to the story bible given these entries. Include only keys that changed; omit any key that is unchanged.
+Produce a DELTA only — include only keys that changed. Omit unchanged keys.
 
-1) Threads
-   - Consider every current thread and any new unresolved question from the last 5 entries.
-   - For each thread, assess status: "new" (just introduced), "open" (still active), "resolved" (answered or superseded).
-   - Use the order of the entries to resolve "who" / "what" questions: the character or thing that appears in the next sentence after an event is often the answer. E.g. if one entry says "the door swung open" and the very next entry introduces "the chef" reacting or entering, then "who is entering?" is resolved — the chef. Mark that thread resolved and add or update that character.
-   - A thread can also be resolved when superseded by a new question (e.g. "mysterious source of flickering light" → "what lies beyond the door" → "who is the rescuer?").
-   - Keep at most the last 5 resolved threads (drop older resolved); keep all "new" and "open".
-   - Set primary_thread to the one thread that is most urgent, important, or best for the story right now (or null if none).
-   - Output "threads": array of { "text": string, "status": "new" | "open" | "resolved" }. Only include threads when something changed.
+── THREADS ──────────────────────────────────────────────────────────────────
+Assess every current thread and any new unresolved question from the entries.
+Status: "new" (just introduced) | "open" (still active) | "resolved" (answered or superseded).
 
-2) Characters, places, objects
-   - Add or update every character, place, or object that appears or is implied in the last 5 entries. When a new character is introduced (e.g. "the chef") and their appearance answers an open thread (e.g. "who is entering?"), add them and mark that thread resolved.
-   - Update with names, adjectives, and location (e.g. where last seen, relation to other places).
-   - Characters: name, one-line description, last_seen.
-   - Places: name, description (including location/atmosphere).
-   - Objects: name, significance.
-   - For arrays: send the full updated list for that key, or omit the key if no change.
+Resolution rules:
+  - If the sentence after an event introduces the answer (e.g. "door swings open" → next sentence introduces "the chef"), mark the thread resolved and add/update that character.
+  - A thread is also resolved when superseded by a more urgent question.
 
-3) Meta, style, rules_of_world, tone
-   - Meta (optional): update genre, baseline tone, or audience only when the last 5 entries clearly shift the overall story type (e.g. from "light school story" into "occult mystery").
-   - Style_guidelines (optional): update prose_style, pov, or do_not only when the writer's intent for prose changes; do not churn these every turn.
-   - Rules_of_world (optional): update tech_level, magic_system, or constraints when the last 5 entries reveal or contradict world rules (e.g. establish that ghosts can speak, or that guns do not exist).
-   - Update tone_established as events unfold (e.g. "moody, atmospheric, tense" → "safe, confused, tense").
-   - Only include when it has changed.
+Limits: keep all "new" and "open" threads; keep only the last 5 "resolved".
+Set primary_thread to the single most urgent or story-critical thread, or null.
+
+── CHARACTERS / PLACES / OBJECTS ────────────────────────────────────────────
+Add or update anything that appears or is clearly implied in the entries.
+  Characters: name, one-line description, last_seen.
+    Add any character or animal that has performed an action in the entries — even if their arrival is mysterious.
+    Their presence is a fact; the circumstances may be a thread. Record both independently.
+    e.g. "a border collie leapt from nowhere" → add character { name: "border collie", description: "...", last_seen: "..." }
+    and thread { text: "Where did the border collie come from?", status: "new" }
+  Places: name, description (location, atmosphere).
+  Objects: name, significance.
+    If a new entry identifies or names a previously vague object, replace the vague entry — do not keep both.
+    e.g. "unknown character" + revealed to be "the chef" → keep only { name: "the chef", description: "...", last_seen: "..." }
+    e.g. "unknown place" + revealed to be "the library" → keep only { name: "the library", description: "...", last_seen: "..." }
+    e.g. "unknown object" + revealed to be "tennis ball" → keep only { name: "tennis ball", significance: "..." }
+Send the full updated array for any key that changed; omit if unchanged.
+
+── META / STYLE / WORLD / TONE ──────────────────────────────────────────────
+Update sparingly — only when the entries clearly shift the story's nature:
+  meta: genre, tone_baseline, audience — only on clear genre shift.
+  style_guidelines: prose_style, pov, do_not — only when prose intent changes.
+  rules_of_world: tech_level, magic_system, constraints — only when world rules are revealed or contradicted.
+  tone_established: update as mood evolves (e.g. "wistful" → "wistful, uneasy").
 
 Return JSON only. No commentary. Use null to clear a scalar.
 
@@ -42,21 +73,9 @@ Return JSON only. No commentary. Use null to clear a scalar.
     "title": null,
     "summary": null,
     "tone_established": null,
-    "meta": {
-      "genre": null,
-      "tone_baseline": null,
-      "audience": null
-    },
-    "style_guidelines": {
-      "prose_style": null,
-      "pov": null,
-      "do_not": []
-    },
-    "rules_of_world": {
-      "tech_level": null,
-      "magic_system": null,
-      "constraints": []
-    },
+    "meta": { "genre": null, "tone_baseline": null, "audience": null },
+    "style_guidelines": { "prose_style": null, "pov": null, "do_not": [] },
+    "rules_of_world": { "tech_level": null, "magic_system": null, "constraints": [] },
     "characters": [],
     "places": [],
     "objects": [],
@@ -66,7 +85,9 @@ Return JSON only. No commentary. Use null to clear a scalar.
   }
 }
 
-Each thread in "threads" must be: { "text": "...", "status": "new" | "open" | "resolved" }.`;
+Each thread: { "text": "...", "status": "new" | "open" | "resolved" }.`;
+
+// ---- User message ----
 
 export function storyBibleUpdateUser(params: {
   currentBible: string;
@@ -75,13 +96,10 @@ export function storyBibleUpdateUser(params: {
   const entriesBlock =
     params.recentEntries.length === 0
       ? "(none)"
-      : params.recentEntries
-          .map((entry, i) => `${i + 1}. ${entry}`)
-          .join("\n");
+      : params.recentEntries.map((e, i) => `${i + 1}. ${e}`).join("\n");
 
-  return `Current story bible:
-${params.currentBible}
+  return `current_bible: ${params.currentBible}
 
-Last 5 story entries (oldest to newest):
+recent_entries (oldest to newest):
 ${entriesBlock}`;
 }

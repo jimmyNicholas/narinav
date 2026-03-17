@@ -14,6 +14,7 @@ import {
   DECISION_MOMENT_2,
   ENDING_TURNS,
   CONTINUE_TURNS,
+  OPENING_TURNS,
   AGENCY_LOCK_THRESHOLD,
 } from "@/lib/constants";
 import { validateWordCount } from "@/lib/wordCount";
@@ -72,6 +73,13 @@ function getEndingPressure(
   if (turnsRemaining >= 3) return 1;
   if (turnsRemaining === 2) return 2;
   return 3;
+}
+
+function getBeatModeForTurn(mode: GameMode, turnsElapsed: number): GameMode {
+  if (mode === "open" || mode === "continue") {
+    return turnsElapsed >= OPENING_TURNS ? "continue" : "open";
+  }
+  return mode;
 }
 
 async function callBeatBot(params: {
@@ -148,6 +156,7 @@ async function callRefinementBot(params: {
 async function callStoryBibleUpdate(params: {
   currentBible: StoryBible;
   recentEntries: string[];
+  mode: GameMode;
   devMode: boolean;
 }): Promise<{ story_bible_update: Parameters<typeof mergeStoryBible>[1] }> {
   const res = await fetch("/api/story", {
@@ -157,6 +166,7 @@ async function callStoryBibleUpdate(params: {
       action: "storyBibleUpdate",
       current_bible: params.currentBible,
       recent_entries: params.recentEntries,
+      mode: params.mode,
       options: { devMode: params.devMode },
     }),
   });
@@ -296,10 +306,11 @@ export default function NarinavClient({
     setView("loading");
     setIsWaiting(true);
     const emptyBible = createEmptyStoryBible();
+    const beatMode = getBeatModeForTurn("open", 0);
     callBeatBot({
       storySoFar: [],
       storyBible: emptyBible,
-      mode: "open",
+      mode: beatMode,
       totalTurnCount: 0,
       pathTurnLimit: null,
       turnsSinceDecision: 0,
@@ -507,10 +518,11 @@ export default function NarinavClient({
           setBeatRemovesLeft(2);
           const pressure = getEndingPressure(pathTurnLimit, turnsSinceDecision);
           if (pressure < 3) {
+            const beatMode = getBeatModeForTurn(mode, totalTurnCount);
             return callBeatBot({
               storySoFar,
               storyBible,
-              mode,
+              mode: beatMode,
               totalTurnCount,
               pathTurnLimit,
               turnsSinceDecision,
@@ -603,10 +615,11 @@ export default function NarinavClient({
         setBeatInputValue("");
         const pressure = getEndingPressure(pathTurnLimit, turnsSinceDecision);
         if (pressure < 3) {
+          const beatMode = getBeatModeForTurn(mode, totalTurnCount);
           return callBeatBot({
             storySoFar,
             storyBible,
-            mode,
+            mode: beatMode,
             totalTurnCount,
             pathTurnLimit,
             turnsSinceDecision,
@@ -682,6 +695,10 @@ export default function NarinavClient({
       setRefinedText("");
       setSelectedBeat(null);
 
+      if (mode === "open" && nextTurnCount >= OPENING_TURNS) {
+        setMode("continue");
+      }
+
       if (nextTurnCount >= maxTurns) {
         triggerEndGame(nextStory);
         return;
@@ -726,6 +743,7 @@ export default function NarinavClient({
           callStoryBibleUpdate({
             currentBible: storyBible,
             recentEntries: lastFiveEntries,
+            mode,
             devMode: options.devMode,
           })
             .then((r) => {
@@ -739,18 +757,19 @@ export default function NarinavClient({
             .catch(() => {
               return storyBible;
             })
-            .then((bibleToUse) =>
-              callBeatBot({
+            .then((bibleToUse) => {
+              const beatMode = getBeatModeForTurn(mode, nextTurnCount);
+              return callBeatBot({
                 storySoFar: nextStory,
                 storyBible: bibleToUse,
-                mode,
+                mode: beatMode,
                 totalTurnCount: nextTurnCount,
                 pathTurnLimit,
                 turnsSinceDecision: nextTurnsSince,
                 maxTurns,
                 devMode: options.devMode,
-              })
-            )
+              });
+            })
             .then((r) => {
               setNextBeats(r.next_beats);
               setBeatRefreshesLeft(2);
@@ -770,6 +789,7 @@ export default function NarinavClient({
         callStoryBibleUpdate({
           currentBible: storyBible,
           recentEntries: lastFiveEntries,
+          mode,
           devMode: options.devMode,
         })
           .then((r) => {
@@ -843,10 +863,11 @@ export default function NarinavClient({
     if (beatRefreshesLeft <= 0 || isWaiting) return;
     setErrorMessage("");
     setIsWaiting(true);
+    const beatMode = getBeatModeForTurn(mode, totalTurnCount);
     callBeatBot({
       storySoFar,
       storyBible,
-      mode,
+      mode: beatMode,
       totalTurnCount,
       pathTurnLimit,
       turnsSinceDecision,

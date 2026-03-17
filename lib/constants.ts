@@ -7,6 +7,7 @@ export const DECISION_MOMENT_1 = 0.6;
 export const DECISION_MOMENT_2 = 0.8;
 export const ENDING_TURNS = 5;
 export const CONTINUE_TURNS = 8;
+export const OPENING_TURNS = 3;
 export const CONTEXT_SWITCH_TURN = 8;
 export const AGENCY_LOCK_THRESHOLD = 2;
 

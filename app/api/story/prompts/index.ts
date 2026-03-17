@@ -9,16 +9,17 @@ export {
 } from "./beatBot";
 
 export {
-  INPUT_CLASSIFIER_SYSTEM,
-  inputClassifierUser,
   getRefinementSystem,
   refinementBotUser,
   FINAL_STORY_BOT_SYSTEM,
   finalStoryBotUser,
   type RefinementMode,
-} from "./storyBot";
+} from "./refinementBot";
+
+export { INPUT_CLASSIFIER_SYSTEM, inputClassifierUser } from "./inputClassifier";
 
 export {
+  STORY_BIBLE_UPDATE_SYSTEM_OPENING,
   STORY_BIBLE_UPDATE_SYSTEM,
   storyBibleUpdateUser,
 } from "./storyBible";
