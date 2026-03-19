@@ -60,43 +60,74 @@ export function NarinavHeader({ options, onOptionsChange }: NarinavHeaderProps) 
       }}
     >
       <div className="space-y-2 flex-1">
-        <h1 className="font-mono font-bold text-themed text-2xl md:text-3xl">
-          Narinav
-        </h1>
+        <div className="flex items-center gap-2 flex-wrap">
+          <h1 className="font-mono font-bold text-themed text-2xl md:text-3xl">
+            Narinav
+          </h1>
+          {options.devMode && (
+            <span
+              className="rounded-md px-2 py-0.5 font-mono text-xs border border-secondary text-secondary"
+              title="All API calls use claude-3-haiku-20240307"
+            >
+              Dev mode — claude-3-haiku-20240307
+            </span>
+          )}
+        </div>
         <p className="text-secondary leading-relaxed text-sm">
           An interactive story-building companion. Co-write a story with Claude.
         </p>
       </div>
 
-      <div className="relative shrink-0">
+      <div className="flex items-center gap-3 shrink-0">
         <button
-          ref={triggerRef}
           type="button"
-          onClick={() => setPanelOpen((open) => !open)}
-          aria-label="Open options"
-          aria-expanded={panelOpen}
-          aria-haspopup="dialog"
-          aria-controls={panelOpen ? panelId : undefined}
-          className="p-2 rounded-xl border-2 border-secondary text-themed transition-colors hover:bg-[color:var(--palette-primary)]/14 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--palette-background)]"
+          className="rounded-2xl border-2 px-4 py-2 font-mono text-sm md:text-base text-themed focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           style={{
             backgroundColor:
-              "color-mix(in srgb, var(--palette-background) 90%, var(--palette-secondary) 10%)",
+              "color-mix(in srgb, #4b9b6a 35%, var(--palette-background) 65%)",
+            borderColor:
+              "color-mix(in srgb, #4b9b6a 80%, var(--palette-primary) 20%)",
+          }}
+          onClick={() => {
+            // Full page reload is the simplest way to reset story state for now.
+            if (typeof window !== "undefined") {
+              window.location.href = window.location.pathname;
+            }
           }}
         >
-          {COG_SVG}
+          New story
         </button>
 
-        <NarinavOptionsPanel
-          options={options}
-          onOptionsChange={onOptionsChange}
-          onClose={() => {
-            setPanelOpen(false);
-            triggerRef.current?.focus();
-          }}
-          panelId={panelId}
-          isOpen={panelOpen}
-          triggerRef={triggerRef}
-        />
+        <div className="relative">
+          <button
+            ref={triggerRef}
+            type="button"
+            onClick={() => setPanelOpen((open) => !open)}
+            aria-label="Open options"
+            aria-expanded={panelOpen}
+            aria-haspopup="dialog"
+            aria-controls={panelOpen ? panelId : undefined}
+            className="p-2 rounded-xl border-2 border-secondary text-themed transition-colors hover:bg-(--palette-primary)/14 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-(--palette-background)"
+            style={{
+              backgroundColor:
+                "color-mix(in srgb, var(--palette-background) 90%, var(--palette-secondary) 10%)",
+            }}
+          >
+            {COG_SVG}
+          </button>
+
+          <NarinavOptionsPanel
+            options={options}
+            onOptionsChange={onOptionsChange}
+            onClose={() => {
+              setPanelOpen(false);
+              triggerRef.current?.focus();
+            }}
+            panelId={panelId}
+            isOpen={panelOpen}
+            triggerRef={triggerRef}
+          />
+        </div>
       </div>
     </header>
   );

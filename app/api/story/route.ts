@@ -1,165 +1,257 @@
 import { NextResponse } from "next/server";
-import type { StoryPayload } from "@/reference/storyBuddyUtils";
+import { cookies } from "next/headers";
+import { getAuthCookieName, verifyAuthToken } from "@/lib/auth";
+import {
+  CONTEXT_SWITCH_TURN,
+  DEV_MODE_MODEL,
+  OPENING_TURNS,
+  PRODUCTION_FINAL_STORY_MODEL,
+  PRODUCTION_GAME_MODEL,
+} from "@/lib/constants";
+import {
+  createEmptyStoryBible,
+  normalizeStoryBible,
+  type ClassifyResponse,
+  type FinalStoryResponse,
+  type GameMode,
+  type StoryBible,
+  type StoryBibleThread,
+  type StoryBibleUpdate,
+  type ThreadStatus,
+} from "@/lib/navinavTypes";
+import { createMessage, extractJson } from "./anthropic";
+import {
+  inputClassifierUser,
+  INPUT_CLASSIFIER_SYSTEM,
+  beatBotUser,
+  getBeatBotSystem,
+  type BeatBotMode,
+  refinementBotUser,
+  getRefinementSystem,
+  storyBibleUpdateUser,
+  STORY_BIBLE_UPDATE_SYSTEM_OPENING,
+  STORY_BIBLE_UPDATE_SYSTEM,
+  finalStoryBotUser,
+  FINAL_STORY_BOT_SYSTEM,
+} from "./prompts";
 
-const ANTHROPIC_VERSION = "2023-06-01";
-
-/** Keep last N chars of story context to limit input tokens (and cost) on long games. */
-const MAX_STORY_CONTEXT_CHARS = 3000;
-
-const SYSTEM_PROMPT_BASE = `You are Story Buddy. Co-write a short story with the user (Exposition → Rising Action → Climax → Falling Action → Resolution).
-
-Respond with a single JSON object only (no markdown). Keys:
-- story_so_far: string[] (full story so far as an ordered list of short beats; each element is one or two short sentences with no embedded newlines)
-- choices: string[] (exactly 3 short options; when ending, use either empty [] or a single choice like "The End")
-- allow_custom_input: boolean (true)
-When finished add: final_title, final_story (complete story).
-
-After the climax, move into a brief resolution (one or two beats). Do not introduce new plot threads or a new adventure after the climax.
-As soon as the resolution is told, the agent MUST set final_title and final_story (the full story including the resolution) and stop offering new branches: use either empty choices or a single choice labeled something like "The End". No further choices after that.
-Never add new plot threads after the resolution. One resolution, then end.
-
-First turn: brief exposition + 3 choices. Always valid JSON.`;
-
-/** Default prompt when there are choices; subtle and short. */
-const DEFAULT_MESSAGE_TO_PLAYER = "Pick one or write your own:";
-
-const PLAYER_MESSENGER_SYSTEM_PROMPT = `You are Story Buddy Messenger. The story has just ended (no more choices).
-
-Respond with a single JSON object only (no markdown). Keys:
-- message_to_player: string (one very short phrase, under 10 words).
-
-Guidelines:
-- Subtle and minimal. Examples: "The end." "Thanks for playing." "Hope you enjoyed the story."
-- Do not recap the plot, themes, or character arcs. No "The choice is yours" or similar.`;
-
-const FINAL_STORY_WRITER_SYSTEM_PROMPT = `You are Story Buddy's final-story writer.
-
-You will receive a story as a list of short beats (one or two sentences each). Your job is to turn them into a single, readable short story.
-
-Respond with a single JSON object only (no markdown). Keys:
-- final_title: string (a short, evocative title for the story)
-- final_story: string (the complete story as continuous prose)
-
-Guidelines for final_story:
-- Write in full paragraphs. Use paragraph breaks (\\n\\n) between logical sections.
-- Keep the same events and tone; improve flow, punctuation, and wording.
-- Do not add new plot points or change the ending.`;
-
-function buildSystemPrompt(opts: {
-  shortSentencesOnly?: boolean;
-  shortSentenceMinWords?: number;
-  shortSentenceMaxWords?: number;
-  usePlayerWordsWhenPossible?: boolean;
-}): string {
-  let prompt = SYSTEM_PROMPT_BASE;
-  if (opts.shortSentencesOnly) {
-    const minRaw = opts.shortSentenceMinWords ?? 8;
-    const maxRaw = opts.shortSentenceMaxWords ?? 18;
-    const minWords = Math.max(5, Math.min(25, Math.round(minRaw)));
-    const maxWords = Math.max(5, Math.min(25, Math.round(maxRaw)));
-    const finalMin = Math.min(minWords, maxWords);
-    const finalMax = Math.max(minWords, maxWords);
-    prompt += `\n\nSentences must be between ${finalMin} and ${finalMax} words`;
-  }
-  if (opts.usePlayerWordsWhenPossible) {
-    prompt +=
-      "\n\nWhen the player chooses an option or types their own action, reflect their words in the story when possible (within safety and coherence).";
-  }
-  return prompt;
+function getModel(devMode: boolean, forFinalStory: boolean): string {
+  if (devMode) return DEV_MODE_MODEL;
+  return forFinalStory ? PRODUCTION_FINAL_STORY_MODEL : PRODUCTION_GAME_MODEL;
 }
 
-function extractJson(text: string): string {
-  const trimmed = text.trim();
-  const codeBlock = /^```(?:json)?\s*([\s\S]*?)```\s*$/m.exec(trimmed);
-  if (codeBlock) return codeBlock[1].trim();
-  const start = trimmed.indexOf("{");
-  const end = trimmed.lastIndexOf("}");
-  if (start >= 0 && end > start) return trimmed.slice(start, end + 1);
-  return trimmed;
+function getRecentStory(storySoFar: string[], totalTurnCount: number): string {
+  const useFull = totalTurnCount <= CONTEXT_SWITCH_TURN;
+  if (useFull && storySoFar.length > 0) {
+    return storySoFar.join("\n");
+  }
+  const last3 = storySoFar.slice(-3);
+  return last3.join("\n");
 }
 
-function parsePayload(text: string): StoryPayload | null {
-  try {
-    const json = extractJson(text);
-    const parsed = JSON.parse(json) as unknown;
-    if (parsed != null && typeof parsed === "object") {
-      const obj = parsed as Record<string, unknown>;
-      if (
-        "story_so_far" in obj ||
-        "message_to_player" in obj ||
-        "final_story" in obj ||
-        "final_title" in obj ||
-        Array.isArray((obj as StoryPayload).choices)
-      ) {
-        return parsed as StoryPayload;
-      }
-    }
-  } catch {
-    // ignore
-  }
-  return null;
+function getEndingPressure(turnsRemaining: number | null): number {
+  if (turnsRemaining === null || turnsRemaining > 4) return 0;
+  if (turnsRemaining >= 3) return 1;
+  if (turnsRemaining === 2) return 2;
+  return 3;
 }
 
-function parseMessengerMessage(text: string): string | null {
-  try {
-    const json = extractJson(text);
-    const parsed = JSON.parse(json) as unknown;
-    if (parsed != null && typeof parsed === "object" && "message_to_player" in (parsed as object)) {
-      const msg = (parsed as { message_to_player?: unknown }).message_to_player;
-      if (typeof msg === "string") {
-        const trimmed = msg.trim();
-        return trimmed.length > 0 ? trimmed : null;
-      }
-    }
-  } catch {
-    // ignore
-  }
-  return null;
-}
-
-type FinalStoryResult = { final_title: string; final_story: string };
-
-function parseFinalStoryPayload(text: string): FinalStoryResult | null {
-  try {
-    const json = extractJson(text);
-    const parsed = JSON.parse(json) as unknown;
-    if (parsed != null && typeof parsed === "object") {
-      const obj = parsed as { final_title?: unknown; final_story?: unknown };
-      const title = typeof obj.final_title === "string" ? obj.final_title.trim() : "";
-      const story = typeof obj.final_story === "string" ? obj.final_story.trim() : "";
-      if (story.length > 0) {
-        return {
-          final_title: title.length > 0 ? title : "The End",
-          final_story: story,
-        };
-      }
-    }
-  } catch {
-    // ignore
-  }
-  return null;
-}
-
-function getFullStoryText(payload: StoryPayload): string {
-  const raw = payload.story_so_far;
-  if (Array.isArray(raw)) {
-    return raw.map((s) => String(s ?? "").trim()).filter(Boolean).join("\n");
-  }
-  if (typeof raw === "string") return raw;
-  return "";
-}
-
-/** True when there are no real next moves: no choices or only an ending choice like "The End". */
-function isStoryEnded(choices: string[]): boolean {
-  if (choices.length === 0) return true;
-  if (choices.length === 1) {
-    const c = choices[0].toLowerCase().trim();
-    return c === "the end" || c === "end" || /^the end\.?$/i.test(c);
-  }
+function isOpeningComplete(bible: StoryBible, turnCount: number): boolean {
+  if (turnCount >= OPENING_TURNS) return true;
+  if (bible.opening_complete === true) return true;
   return false;
 }
 
+function ensureTriple<T>(arr: unknown[], def: T): [T, T, T] {
+  const a = Array.isArray(arr) ? arr : [];
+  return [
+    (typeof a[0] !== "undefined" ? a[0] : def) as T,
+    (typeof a[1] !== "undefined" ? a[1] : def) as T,
+    (typeof a[2] !== "undefined" ? a[2] : def) as T,
+  ];
+}
+
+function parseClassify(text: string): ClassifyResponse | null {
+  try {
+    const json = extractJson(text);
+    const o = JSON.parse(json) as Record<string, unknown>;
+    const input_type = String(o.input_type ?? "bare_beat");
+    const cleaned_input = String(o.cleaned_input ?? "").trim();
+    const notes = String(o.notes ?? "").trim();
+    if (!cleaned_input) return null;
+    return { input_type: input_type as ClassifyResponse["input_type"], cleaned_input, notes };
+  } catch {
+    return null;
+  }
+}
+
+function parseFinalStoryResponse(text: string): FinalStoryResponse | null {
+  try {
+    const json = extractJson(text);
+    const o = JSON.parse(json) as Record<string, unknown>;
+    const title = String(o.title ?? "Untitled").trim();
+    const story = String(o.story ?? "").trim();
+    const preview_sentence = String(o.preview_sentence ?? "").trim();
+    if (!story) return null;
+    return { title, story, preview_sentence };
+  } catch {
+    return null;
+  }
+}
+
+const THREAD_STATUSES: ThreadStatus[] = ["new", "open", "resolved"];
+
+const STORY_BIBLE_UPDATE_KEYS = new Set([
+  "title", "summary", "tone_established", "meta", "style_guidelines",
+  "rules_of_world", "characters", "places", "objects", "threads",
+  "primary_thread", "cliffhanger_summary",
+  "narrator", "trajectory", "opening_complete", "missing",
+]);
+
+function parseStoryBibleUpdateResponse(text: string): StoryBibleUpdate | null {
+  try {
+    const json = extractJson(text);
+    const o = JSON.parse(json) as Record<string, unknown>;
+    let update: Record<string, unknown>;
+    if (o.story_bible_update != null && typeof o.story_bible_update === "object") {
+      update = o.story_bible_update as Record<string, unknown>;
+    } else if (Object.keys(o).some((k) => STORY_BIBLE_UPDATE_KEYS.has(k))) {
+      update = o;
+    } else {
+      return null;
+    }
+    const out: StoryBibleUpdate = {};
+
+    if (update.title !== undefined) out.title = update.title as string | null;
+    if (update.summary !== undefined) out.summary = update.summary as string | null;
+    if (update.tone_established !== undefined)
+      out.tone_established = update.tone_established as string | null;
+    if (update.cliffhanger_summary !== undefined)
+      out.cliffhanger_summary = update.cliffhanger_summary as string | null;
+    if (update.primary_thread !== undefined)
+      out.primary_thread = update.primary_thread as string | null;
+
+    if (Array.isArray(update.characters)) out.characters = update.characters as StoryBible["characters"];
+    if (Array.isArray(update.places)) out.places = update.places as StoryBible["places"];
+    if (Array.isArray(update.objects)) out.objects = update.objects as StoryBible["objects"];
+
+    if (update.narrator !== undefined) {
+      if (update.narrator === null) {
+        out.narrator = null;
+      } else if (update.narrator && typeof update.narrator === "object") {
+        const n = update.narrator as Record<string, unknown>;
+        const voice = typeof n.voice === "string" ? n.voice : n.voice === null ? null : null;
+        const registerRaw = n.register;
+        const register =
+          registerRaw === "mundane" ||
+          registerRaw === "literary" ||
+          registerRaw === "uncanny" ||
+          registerRaw === "playful"
+            ? registerRaw
+            : null;
+        const interiorityRaw = n.interiority;
+        const interiority =
+          interiorityRaw === "high" || interiorityRaw === "low" ? interiorityRaw : null;
+        out.narrator = { voice, register, interiority };
+      }
+    }
+
+    if (update.trajectory !== undefined) {
+      const t = update.trajectory;
+      out.trajectory = t === "inward" || t === "outward" || t === "relational" ? t : null;
+    }
+
+    if (update.opening_complete !== undefined) {
+      out.opening_complete = Boolean(update.opening_complete);
+    }
+
+    if (update.missing !== undefined) {
+      out.missing = Array.isArray(update.missing)
+        ? (update.missing.map((x) => String(x)) as string[])
+        : [];
+    }
+
+    if (Array.isArray(update.threads)) {
+      const threads: StoryBibleThread[] = [];
+      for (const t of update.threads) {
+        if (t == null || typeof t !== "object") continue;
+        const obj = t as Record<string, unknown>;
+        const text = typeof obj.text === "string" ? obj.text.trim() : "";
+        const status = THREAD_STATUSES.includes(obj.status as ThreadStatus)
+          ? (obj.status as ThreadStatus)
+          : "open";
+        if (text) threads.push({ text, status });
+      }
+      if (threads.length > 0) out.threads = threads;
+    }
+
+    return out;
+  } catch {
+    return null;
+  }
+}
+
+function parseBeatBotResponse(text: string): { next_beats: [string, string, string] } | null {
+  try {
+    const json = extractJson(text);
+    const o = JSON.parse(json) as Record<string, unknown>;
+    const next_beats = ensureTriple(
+      Array.isArray(o.next_beats) ? o.next_beats : [],
+      ""
+    );
+    return { next_beats };
+  } catch {
+    return null;
+  }
+}
+
+function parseRefinementBotResponse(
+  text: string,
+  mode?: "ending" | "chapter"
+): {
+  renderings: [string, string, string];
+  natural_ending_detected: boolean;
+  moral?: string | null;
+  chapter_bible?: StoryBible | null;
+} | null {
+  try {
+    const json = extractJson(text);
+    const o = JSON.parse(json) as Record<string, unknown>;
+    const renderings = ensureTriple(
+      Array.isArray(o.renderings) ? o.renderings : [],
+      ""
+    );
+    const out: {
+      renderings: [string, string, string];
+      natural_ending_detected: boolean;
+      moral?: string | null;
+      chapter_bible?: StoryBible | null;
+    } = {
+      renderings,
+      natural_ending_detected: Boolean(o.natural_ending_detected),
+    };
+    if (mode === "ending")
+      out.moral =
+        typeof o.moral === "string" ? o.moral : o.moral === null ? null : undefined;
+    if (
+      mode === "chapter" &&
+      o.chapter_bible != null &&
+      typeof o.chapter_bible === "object"
+    )
+      out.chapter_bible = normalizeStoryBible(o.chapter_bible as Partial<StoryBible>);
+    return out;
+  } catch {
+    return null;
+  }
+}
+
 export async function POST(request: Request) {
+  const token = (await cookies()).get(getAuthCookieName())?.value;
+  const user = token ? await verifyAuthToken(token) : null;
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     return NextResponse.json(
@@ -170,198 +262,310 @@ export async function POST(request: Request) {
 
   let body: {
     action: string;
-    choice?: string;
-    storySoFar?: string;
-    messageToPlayer?: string;
-    options?: {
-      shortSentencesOnly?: boolean;
-      shortSentenceMinWords?: number;
-      shortSentenceMaxWords?: number;
-      usePlayerWordsWhenPossible?: boolean;
-    };
+    raw_input?: string;
+    cleaned_input?: string;
+    input_type?: string;
+    story_so_far?: string[];
+    story_bible?: StoryBible;
+    current_bible?: StoryBible;
+    latest_entry?: string;
+    recent_entries?: string[];
+    total_turn_count?: number;
+    mode?: GameMode;
+    path_turn_limit?: number | null;
+    turns_since_decision?: number;
+    max_turns?: number;
+    moral?: string | null;
+    options?: { devMode?: boolean };
   };
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json(
-      { error: "Invalid JSON body" },
-      { status: 400 }
-    );
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const action = body.action === "choice" ? "choice" : "start";
-  const storySoFar = (body.storySoFar ?? "").slice(-MAX_STORY_CONTEXT_CHARS);
-  const userContent =
-    action === "start"
-      ? "Start the story. Return only the JSON object for the first turn."
-      : `The player chose: "${body.choice ?? ""}". Current story_so_far:\n${storySoFar}\n\nCurrent message_to_player was: ${body.messageToPlayer ?? ""}\n\nReturn the next turn as a single JSON object only.`;
-
   const options = body.options ?? {};
-  const systemPrompt = buildSystemPrompt({
-    shortSentencesOnly: options.shortSentencesOnly === true,
-    shortSentenceMinWords: options.shortSentenceMinWords,
-    shortSentenceMaxWords: options.shortSentenceMaxWords,
-    usePlayerWordsWhenPossible: options.usePlayerWordsWhenPossible === true,
-  });
+  const devMode = options.devMode === true;
+  const maxTurns = Math.min(30, Math.max(5, Number(body.max_turns) || 20));
 
-  try {
-    // First call: generate story_so_far, choices, and any final_* fields.
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": ANTHROPIC_VERSION,
-      },
-      body: JSON.stringify({
-        model: "claude-3-haiku-20240307",
-        max_tokens: 2048,
-        cache_control: { type: "ephemeral" },
-        system: systemPrompt,
-        messages: [{ role: "user", content: userContent }],
-      }),
-    });
-
-    const data = (await res.json()) as {
-      content?: Array<{ type: string; text?: string }>;
-      error?: { message?: string };
-    };
-
-    if (!res.ok) {
-      const errMsg = data.error?.message ?? `HTTP ${res.status}`;
-      return NextResponse.json({ error: errMsg }, { status: 502 });
-    }
-
-    const textBlock = data.content?.find((b) => b.type === "text");
-    const text = textBlock?.text ?? "";
-    const payload = parsePayload(text);
-
-    if (!payload) {
+  if (body.action === "classify") {
+    const rawInput = String(body.raw_input ?? "").trim();
+    if (!rawInput) {
       return NextResponse.json(
-        { error: "Could not parse story payload from response", raw: text.slice(0, 500) },
-        { status: 502 }
+        { error: "classify requires raw_input" },
+        { status: 400 }
       );
     }
-
-    const choices =
-      Array.isArray(payload.choices) && payload.choices.length > 0
-        ? payload.choices.filter(
-            (c): c is string => typeof c === "string" && c.trim().length > 0
-          )
-        : [];
-
-    const storyEnded = isStoryEnded(choices);
-    let messageToPlayer: string;
-
-    if (!storyEnded) {
-      messageToPlayer = DEFAULT_MESSAGE_TO_PLAYER;
-    } else {
-      // Story ended: one short LLM call for a minimal closing line.
-      const messengerRes = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": apiKey,
-          "anthropic-version": ANTHROPIC_VERSION,
-        },
-        body: JSON.stringify({
-          model: "claude-3-haiku-20240307",
-          max_tokens: 64,
-          cache_control: { type: "ephemeral" },
-          system: PLAYER_MESSENGER_SYSTEM_PROMPT,
-          messages: [
-            {
-              role: "user",
-              content:
-                "The story has ended. Respond with JSON: {\"message_to_player\": \"one short phrase\"}.",
-            },
-          ],
-        }),
+    try {
+      const text = await createMessage({
+        apiKey,
+        model: getModel(devMode, false),
+        system: INPUT_CLASSIFIER_SYSTEM,
+        messages: [{ role: "user", content: inputClassifierUser(rawInput) }],
+        maxTokens: 512,
       });
-
-      const messengerData = (await messengerRes.json()) as {
-        content?: Array<{ type: string; text?: string }>;
-        error?: { message?: string };
-      };
-
-      if (!messengerRes.ok) {
-        const errMsg =
-          messengerData.error?.message ?? `HTTP ${messengerRes.status}`;
-        return NextResponse.json({ error: errMsg }, { status: 502 });
+      const result = parseClassify(text);
+      if (!result) {
+        return NextResponse.json(
+          { error: "Could not parse classifier response", raw: text.slice(0, 500) },
+          { status: 502 }
+        );
       }
+      return NextResponse.json(result);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Anthropic API request failed";
+      return NextResponse.json({ error: message }, { status: 502 });
+    }
+  }
 
-      const messengerTextBlock = messengerData.content?.find(
-        (b) => b.type === "text"
+  if (body.action === "beatBot") {
+    const storySoFar = Array.isArray(body.story_so_far)
+      ? body.story_so_far
+      : [];
+    const storyBible: StoryBible =
+      body.story_bible && typeof body.story_bible === "object"
+        ? body.story_bible
+        : createEmptyStoryBible();
+    const totalTurnCount = Number(body.total_turn_count) || 0;
+    const mode = (body.mode as GameMode) ?? "open";
+    // Open mode runs for turns 0–2 (opening zone); then continue. Ending/chapter pass through.
+    const effectiveMode: BeatBotMode =
+      mode === "ending" || mode === "chapter"
+        ? (mode as BeatBotMode)
+        : isOpeningComplete(storyBible, totalTurnCount)
+          ? "continue"
+          : "open";
+    const beatMode = effectiveMode;
+    const narrativePosition =
+      maxTurns > 0 ? Math.min(1, totalTurnCount / maxTurns) : 0;
+    const recentStory = getRecentStory(storySoFar, totalTurnCount);
+    // In open mode, strip threads and primary_thread from the bible payload.
+    // The Beat Bot open prompt must not see threads — they cause thread-chasing
+    // regardless of prompt instructions. Omitting them is cleaner than instructing.
+    const bibleForBeatBot =
+      effectiveMode === "open"
+        ? { ...storyBible, threads: [], primary_thread: null }
+        : storyBible;
+    const storyBibleStr = JSON.stringify(bibleForBeatBot, null, 0);
+    try {
+      const userContent = beatBotUser({
+        storyBible: storyBibleStr,
+        recentStory,
+        narrativePosition,
+        mode: beatMode,
+      });
+      const text = await createMessage({
+        apiKey,
+        model: getModel(devMode, false),
+        system: getBeatBotSystem(beatMode),
+        messages: [{ role: "user", content: userContent }],
+        maxTokens: 512,
+      });
+      const result = parseBeatBotResponse(text);
+      if (!result) {
+        return NextResponse.json(
+          { error: "Could not parse Beat Bot response", raw: text.slice(0, 500) },
+          { status: 502 }
+        );
+      }
+      return NextResponse.json(result);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Anthropic API request failed";
+      return NextResponse.json({ error: message }, { status: 502 });
+    }
+  }
+
+  if (body.action === "refinementBot") {
+    const storySoFar = Array.isArray(body.story_so_far)
+      ? body.story_so_far
+      : [];
+    const storyBible: StoryBible =
+      body.story_bible && typeof body.story_bible === "object"
+        ? body.story_bible
+        : createEmptyStoryBible();
+    const cleanedInput = String(body.cleaned_input ?? "").trim();
+    const inputType = String(body.input_type ?? "pre_generated");
+    const mode = (body.mode as GameMode) ?? "open";
+    const totalTurnCount = Number(body.total_turn_count) || 0;
+    const pathTurnLimit = body.path_turn_limit ?? null;
+    const turnsSinceDecision = Number(body.turns_since_decision) ?? 0;
+    const turnsRemaining =
+      pathTurnLimit !== null ? pathTurnLimit - turnsSinceDecision : null;
+    const endingPressure = getEndingPressure(turnsRemaining);
+    const closeType =
+      mode === "chapter" ? "chapter" : mode === "ending" ? "story" : undefined;
+    const recentStory = getRecentStory(storySoFar, totalTurnCount);
+    const storyBibleStr = JSON.stringify(storyBible, null, 0);
+    if (!cleanedInput) {
+      return NextResponse.json(
+        { error: "refinementBot requires cleaned_input" },
+        { status: 400 }
       );
-      const messengerText = messengerTextBlock?.text ?? "";
-      const parsed = parseMessengerMessage(messengerText);
-      if (!parsed) {
+    }
+    try {
+      const userContent = refinementBotUser({
+        storyBible: storyBibleStr,
+        recentStory,
+        mode,
+        inputType,
+        cleanedInput,
+        ...(mode === "ending" || mode === "chapter"
+          ? {
+              turnsRemaining: turnsRemaining ?? 0,
+              endingPressure,
+              closeType: closeType!,
+            }
+          : {}),
+      });
+      const system = getRefinementSystem(
+        mode,
+        mode === "ending" || mode === "chapter" ? endingPressure : undefined,
+        closeType ?? undefined
+      );
+      const text = await createMessage({
+        apiKey,
+        model: getModel(devMode, false),
+        system,
+        messages: [{ role: "user", content: userContent }],
+        maxTokens: 2048,
+      });
+      const result = parseRefinementBotResponse(
+        text,
+        mode === "ending" ? "ending" : mode === "chapter" ? "chapter" : undefined
+      );
+      if (!result) {
         return NextResponse.json(
           {
-            error: "Could not parse message_to_player from messenger response",
-            raw: messengerText.slice(0, 500),
+            error: "Could not parse Refinement Bot response",
+            raw: text.slice(0, 500),
           },
           { status: 502 }
         );
       }
-      messageToPlayer = parsed;
+      return NextResponse.json(result);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Anthropic API request failed";
+      return NextResponse.json({ error: message }, { status: 502 });
     }
-
-    // When story ended, ensure we have a proper final_story (continuous prose) if the model didn't provide one.
-    let finalTitle = payload.final_title != null ? String(payload.final_title).trim() : "";
-    let finalStory = payload.final_story != null ? String(payload.final_story).trim() : "";
-    const needsFinalStory = storyEnded && (finalStory.length === 0 || finalTitle.length === 0);
-    const fullStoryBeats = getFullStoryText(payload);
-
-    if (needsFinalStory && fullStoryBeats.length > 0) {
-      const writerRes = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "x-api-key": apiKey,
-          "anthropic-version": ANTHROPIC_VERSION,
-        },
-        body: JSON.stringify({
-          model: "claude-3-haiku-20240307",
-          max_tokens: 1024,
-          cache_control: { type: "ephemeral" },
-          system: FINAL_STORY_WRITER_SYSTEM_PROMPT,
-          messages: [
-            {
-              role: "user",
-              content: `Story beats:\n\n${fullStoryBeats}\n\nReturn JSON with final_title and final_story (full prose, with paragraph breaks).`,
-            },
-          ],
-        }),
-      });
-
-      const writerData = (await writerRes.json()) as {
-        content?: Array<{ type: string; text?: string }>;
-        error?: { message?: string };
-      };
-
-      if (writerRes.ok) {
-        const writerTextBlock = writerData.content?.find((b) => b.type === "text");
-        const writerText = writerTextBlock?.text ?? "";
-        const written = parseFinalStoryPayload(writerText);
-        if (written) {
-          finalStory = written.final_story;
-          if (finalTitle.length === 0) finalTitle = written.final_title;
-        }
-      }
-    }
-
-    const finalPayload: StoryPayload = {
-      ...payload,
-      message_to_player: messageToPlayer,
-      ...(finalTitle.length > 0 ? { final_title: finalTitle } : {}),
-      ...(finalStory.length > 0 ? { final_story: finalStory } : {}),
-    };
-
-    return NextResponse.json({ payload: finalPayload });
-  } catch (err) {
-    const message =
-      err instanceof Error ? err.message : "Anthropic API request failed";
-    return NextResponse.json({ error: message }, { status: 502 });
   }
+
+  if (body.action === "storyBibleUpdate") {
+    const rawBible =
+      body.current_bible && typeof body.current_bible === "object"
+        ? body.current_bible
+        : {};
+    const currentBible = normalizeStoryBible(rawBible as Partial<StoryBible>);
+
+    const recentEntriesRaw = Array.isArray(body.recent_entries)
+      ? body.recent_entries
+      : body.latest_entry !== undefined
+        ? [String(body.latest_entry).trim()]
+        : [];
+    const recentEntries = recentEntriesRaw
+      .map((e: unknown) => String(e).trim())
+      .filter(Boolean)
+      .slice(-5);
+    if (recentEntries.length === 0) {
+      return NextResponse.json(
+        { error: "storyBibleUpdate requires recent_entries (or latest_entry)" },
+        { status: 400 }
+      );
+    }
+
+    try {
+      const mode =
+        body.mode === "open" ||
+        body.mode === "continue" ||
+        body.mode === "ending" ||
+        body.mode === "chapter"
+          ? (body.mode as BeatBotMode)
+          : "continue";
+      const system =
+        mode === "open"
+          ? STORY_BIBLE_UPDATE_SYSTEM_OPENING
+          : STORY_BIBLE_UPDATE_SYSTEM;
+      const userContent = storyBibleUpdateUser({
+        currentBible: JSON.stringify(currentBible, null, 0),
+        recentEntries,
+      });
+      const text = await createMessage({
+        apiKey,
+        model: getModel(devMode, false),
+        system,
+        messages: [{ role: "user", content: userContent }],
+        maxTokens: 1024,
+      });
+      const story_bible_update = parseStoryBibleUpdateResponse(text);
+      if (!story_bible_update) {
+        return NextResponse.json(
+          {
+            error: "Could not parse Story Bible Update response",
+            raw: text.slice(0, 500),
+          },
+          { status: 502 }
+        );
+      }
+      return NextResponse.json({ story_bible_update });
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Anthropic API request failed";
+      return NextResponse.json({ error: message }, { status: 502 });
+    }
+  }
+
+  if (body.action === "finalStory") {
+    const storySoFar = Array.isArray(body.story_so_far)
+      ? body.story_so_far
+      : [];
+    const storyBible: StoryBible =
+      body.story_bible && typeof body.story_bible === "object"
+        ? body.story_bible
+        : createEmptyStoryBible();
+    const mode = (body.mode as GameMode) ?? "ending";
+    const moral = body.moral ?? null;
+
+    const storySoFarText = storySoFar.join("\n");
+    const storyBibleStr = JSON.stringify(storyBible, null, 0);
+
+    try {
+      const userContent = finalStoryBotUser({
+        mode,
+        storyBible: storyBibleStr,
+        storySoFar: storySoFarText,
+        moral,
+      });
+      const text = await createMessage({
+        apiKey,
+        model: getModel(devMode, true),
+        system: FINAL_STORY_BOT_SYSTEM,
+        messages: [{ role: "user", content: userContent }],
+        maxTokens: 2048,
+      });
+      const result = parseFinalStoryResponse(text);
+      if (!result) {
+        return NextResponse.json(
+          {
+            error: "Could not parse Final Story Bot response",
+            raw: text.slice(0, 500),
+          },
+          { status: 502 }
+        );
+      }
+      return NextResponse.json(result);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Anthropic API request failed";
+      return NextResponse.json({ error: message }, { status: 502 });
+    }
+  }
+
+  return NextResponse.json(
+    {
+      error: "Unknown action. Use classify, beatBot, refinementBot, storyBibleUpdate, or finalStory.",
+    },
+    { status: 400 }
+  );
 }

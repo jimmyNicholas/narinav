@@ -61,3 +61,16 @@ Use this document in the Narinav repo so the project (and any tooling/AI) has fu
 - **First page**: `app/page.tsx`.
 - **Reference UI / types**: `reference/StoryBuddyPanels.tsx`, `reference/storyBuddyUtils.ts`, `reference/layout.tsx`, `reference/StoryBuddyClient.tsx`, `reference/page.tsx` — use for layout and components; replace Voiceflow with own state and chat API.
 - **Node**: `.nvmrc` and `package.json` `engines` for 24.13.0.
+
+---
+
+## General architecture tips
+
+Use these when implementing the Navinav mechanics and any follow-up work.
+
+- **Break up large files.** If a file (e.g. the story API route or the main client) grows past a few hundred lines, split by responsibility: e.g. `prompts/`, `lib/gameState.ts`, `lib/triggers.ts`, or separate route handlers that the main route delegates to. Smaller files are easier to navigate and review.
+- **Hide abstractions where possible.** Keep the “what” visible and the “how” behind clear boundaries. For example: a single `callActiveBot(context)` that picks the bot and builds the request internally, or a `validateWordCount(text, min, max)` utility used at the UI boundary. Call sites stay readable; details live in one place.
+- **Keep the prompt area clean and clear.** Store each bot prompt in its own constant or file (e.g. `prompts/inputClassifier.ts`, `prompts/storyBot.ts`). Use a single, obvious place to inject variables (e.g. `{story_bible}`, `{recent_story}`) so prompts are easy to read and edit without digging through request logic. Avoid building prompts from many string fragments in the middle of route code.
+- **Co-locate game constants.** Define MAX_TURNS, DECISION_MOMENT_1/2, word limits, etc. in one module (e.g. `lib/constants.ts` or next to the types). Use them in both client and server so the game rules don’t drift.
+- **One source of truth for session/turn shape.** Define session and turn state types once and reuse them in the API contract and client state. Reduces mismatches and makes it obvious what each request/response carries.
+- **Prefer a single story API entrypoint with an action discriminator.** Use one route (e.g. `POST /api/story`) with `action: 'classify' | 'activeBot' | 'finalStory'` rather than three separate routes, so model routing and shared helpers (e.g. `getModel(devMode)`, JSON parsing) stay in one place.

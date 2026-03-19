@@ -1,5 +1,24 @@
-import React from "react";
-import { parseStoryLines } from "./storyBuddyUtils";
+"use client";
+
+import React, { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
+import {
+  Panel,
+  MessageBlock,
+  Bubble,
+  PrimaryButton,
+  SecondaryButton,
+  getCardBg,
+  PANEL_BG,
+} from "./NarnavUI";
+
+/** Parse story text into display segments (paragraphs). */
+function parseStoryLines(story: string): string[] {
+  return String(story ?? "")
+    .split(/\n+/)
+    .map((line) => line.replace(/^\s*\*\s*/, "").trim())
+    .filter(Boolean);
+}
 
 type FinalStoryPanelProps = {
   finalTitle: string;
@@ -8,13 +27,11 @@ type FinalStoryPanelProps = {
 
 export function FinalStoryPanel({ finalTitle, finalStory }: FinalStoryPanelProps) {
   return (
-    <section
+    <Panel
+      as="section"
+      variant="soft"
       className="lg:col-span-2 border-2 border-secondary rounded-3xl p-6 flex flex-col min-h-[320px]"
       aria-label="Final story"
-      style={{
-        backgroundColor:
-          "color-mix(in srgb, var(--palette-background) 92%, var(--palette-secondary) 8%)",
-      }}
     >
       <h2 className="font-mono font-bold text-themed text-lg mb-3">
         Final story
@@ -27,24 +44,40 @@ export function FinalStoryPanel({ finalTitle, finalStory }: FinalStoryPanelProps
       <div className="text-themed text-sm leading-relaxed flex-1 overflow-y-auto whitespace-pre-line font-mono">
         {finalStory || "(No final story provided.)"}
       </div>
-    </section>
+    </Panel>
   );
 }
 
 type StorySoFarPanelProps = {
   storySoFar: string;
   turnCount?: number;
+  maxTurns?: number;
+  selectedBeat?: string | null;
+  onRemoveBeat?: () => void;
+  canRemoveBeat?: boolean;
 };
 
-export function StorySoFarPanel({ storySoFar, turnCount }: StorySoFarPanelProps) {
+export function StorySoFarPanel({
+  storySoFar,
+  turnCount,
+  maxTurns,
+  selectedBeat,
+  onRemoveBeat,
+  canRemoveBeat,
+}: StorySoFarPanelProps) {
+  const hasTurnInfo = turnCount != null && turnCount > 0 && maxTurns != null && maxTurns > 0;
+  const turnLabel =
+    hasTurnInfo && turnCount != null && maxTurns != null
+      ? `Turn ${turnCount} of ${maxTurns}`
+      : turnCount != null && turnCount > 0
+        ? `Turn ${turnCount}`
+        : "—";
+
   return (
     <section
       className="border-[3px] border-primary rounded-3xl p-6 flex flex-col min-h-[500px] max-h-[560px] overflow-hidden"
       aria-label="Story so far"
-      style={{
-        backgroundColor:
-          "color-mix(in srgb, var(--palette-background) 94%, var(--palette-secondary) 6%)",
-      }}
+      style={{ backgroundColor: PANEL_BG.default }}
     >
       <div className="flex items-center justify-between gap-3 mb-3">
         <h2 className="font-mono font-bold text-themed text-lg shrink-0">
@@ -52,9 +85,9 @@ export function StorySoFarPanel({ storySoFar, turnCount }: StorySoFarPanelProps)
         </h2>
         <span
           className="font-mono text-secondary text-sm shrink-0"
-          aria-label={turnCount != null ? `Turn ${turnCount}` : undefined}
+          aria-label={turnLabel !== "—" ? turnLabel : undefined}
         >
-          {turnCount != null && turnCount > 0 ? `Turn ${turnCount}` : "—"}
+          {turnLabel}
         </span>
       </div>
       <div
@@ -74,48 +107,17 @@ export function StorySoFarPanel({ storySoFar, turnCount }: StorySoFarPanelProps)
             Your story will go here...
           </span>
         )}
+        {selectedBeat && selectedBeat.trim() && (
+          <div className="mt-3 flex flex-col gap-2">
+            <Bubble>{selectedBeat}</Bubble>
+            {canRemoveBeat && onRemoveBeat && (
+              <SecondaryButton onClick={onRemoveBeat} className="self-start py-1.5">
+                Remove this beat — back to choices
+              </SecondaryButton>
+            )}
+          </div>
+        )}
       </div>
-    </section>
-  );
-}
-
-type MessagePanelProps = {
-  messageToPlayer: string;
-  hasPlaceholderIssue: boolean;
-};
-
-export function MessagePanel({
-  messageToPlayer,
-  hasPlaceholderIssue,
-}: MessagePanelProps) {
-  if (!messageToPlayer && !hasPlaceholderIssue) return null;
-
-  return (
-    <section
-      className="border-2 border-secondary rounded-3xl p-5"
-      aria-label="Story Buddy message"
-      style={{
-        backgroundColor:
-          "color-mix(in srgb, var(--palette-background) 97%, var(--palette-secondary) 3%)",
-      }}
-    >
-      {hasPlaceholderIssue && (
-        <p className="mb-2 text-xs font-mono text-secondary">
-          Voiceflow is sending template tokens (e.g.{" "}
-          <code className="opacity-90">
-            {"{message_to_player}"}
-          </code>
-          ). Wire it the same way as{" "}
-          <code className="opacity-90">story_so_far</code> so the
-          payload contains real text.
-        </p>
-      )}
-      <p className="text-themed text-2xl leading-relaxed whitespace-pre-line">
-        {messageToPlayer ||
-          (hasPlaceholderIssue
-            ? "(message_to_player not substituted — fix in Voiceflow)"
-            : "")}
-      </p>
     </section>
   );
 }
@@ -128,7 +130,9 @@ type OptionsPanelProps = {
   onCustomInputChange: (value: string) => void;
   onCustomSubmit: () => void;
   onChoiceClick: (index: number, choiceText: string) => void;
-  customInputRef: { current: HTMLInputElement | null };
+  customInputRef: React.RefObject<HTMLTextAreaElement | null>;
+  onRefreshBeats?: () => void;
+  beatRefreshesLeft?: number;
 };
 
 export function OptionsPanel({
@@ -140,16 +144,15 @@ export function OptionsPanel({
   onCustomSubmit,
   onChoiceClick,
   customInputRef,
+  onRefreshBeats,
+  beatRefreshesLeft = 0,
 }: OptionsPanelProps) {
   return (
     <section
       className="relative border-2 border-secondary rounded-3xl p-4 flex flex-col gap-3 flex-1 min-h-0"
       aria-label="Choose what happens next"
       aria-busy={isWaitingForPayload ? "true" : "false"}
-      style={{
-        backgroundColor:
-          "color-mix(in srgb, var(--palette-background) 94%, var(--palette-secondary) 6%)",
-      }}
+      style={{ backgroundColor: PANEL_BG.default }}
     >
       {isWaitingForPayload && (
         <div
@@ -169,63 +172,68 @@ export function OptionsPanel({
         </div>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-1 gap-3 flex-1 min-h-0 auto-rows-fr">
-        {[0, 1, 2].map((i) => {
-          const choice = choicesList[i] ?? "";
-          const hasChoice = choice.length > 0;
-          return (
-            <button
-              key={`choice-${i}-${choice.slice(0, 48)}`}
-              type="button"
-              disabled={!hasChoice || isWaitingForPayload}
-              className="h-full w-full text-left px-4 py-3 border-2 border-primary rounded-2xl text-themed text-base leading-relaxed font-mono transition-all duration-200 motion-reduce:transition-none enabled:cursor-pointer hover:bg-(--palette-primary)/14 hover:shadow-md hover:shadow-black/10 hover:-translate-y-0.5 motion-reduce:hover:translate-y-0 hover:border-primary active:translate-y-0 active:scale-[0.99] motion-reduce:active:scale-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-(--palette-background) disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:shadow-none disabled:hover:translate-y-0 disabled:active:scale-100"
-              style={{
-                backgroundColor:
-                  "color-mix(in srgb, var(--palette-background) 90%, var(--palette-secondary) 10%)",
-              }}
-              onClick={() =>
-                hasChoice && !isWaitingForPayload && onChoiceClick(i, choice)
-              }
-            >
-              {hasChoice ? choice : "—"}
-            </button>
-          );
-        })}
+      <div className="flex flex-col sm:flex-row items-start gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-1 gap-3 flex-1 min-h-0 auto-rows-fr w-full">
+          {[0, 1, 2].map((i) => {
+            const choice = choicesList[i] ?? "";
+            const hasChoice = choice.length > 0;
+            return (
+              <button
+                key={`choice-${i}-${choice.slice(0, 48)}`}
+                type="button"
+                disabled={!hasChoice || isWaitingForPayload}
+                className="h-full w-full text-left px-4 py-3 border-2 border-primary rounded-2xl text-themed text-base leading-relaxed font-mono transition-all duration-200 motion-reduce:transition-none enabled:cursor-pointer hover:bg-(--palette-primary)/14 hover:shadow-md hover:shadow-black/10 hover:-translate-y-0.5 motion-reduce:hover:translate-y-0 hover:border-primary active:translate-y-0 active:scale-[0.99] motion-reduce:active:scale-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-(--palette-background) disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:shadow-none disabled:hover:translate-y-0 disabled:active:scale-100"
+                style={{ backgroundColor: getCardBg() }}
+                onClick={() =>
+                  hasChoice && !isWaitingForPayload && onChoiceClick(i, choice)
+                }
+              >
+                {hasChoice ? choice : "—"}
+              </button>
+            );
+          })}
+        </div>
+        {onRefreshBeats != null && beatRefreshesLeft > 0 ? (
+          <SecondaryButton
+            onClick={onRefreshBeats}
+            disabled={isWaitingForPayload}
+            aria-label={`Refresh choices (${beatRefreshesLeft} left)`}
+            className="shrink-0 self-center"
+          >
+            Refresh ({beatRefreshesLeft})
+          </SecondaryButton>
+        ) : null}
       </div>
 
       {allowCustomInput ? (
         <div className="flex flex-col sm:flex-row gap-2 pt-1 shrink-0">
-          <label className="sr-only" htmlFor="story-buddy-custom-input">
+          <label className="sr-only" htmlFor="narinav-custom-input">
             Or type your own action
           </label>
-          <input
-            id="story-buddy-custom-input"
+          <textarea
+            id="narinav-custom-input"
             ref={customInputRef}
-            type="text"
             value={customInputValue}
             onChange={(e) => onCustomInputChange(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && onCustomSubmit()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                onCustomSubmit();
+              }
+            }}
             disabled={isWaitingForPayload}
             placeholder="Or type your own action..."
-            className="w-full px-3 py-2 border-2 border-secondary rounded-2xl text-themed text-base font-mono bg-transparent placeholder:text-secondary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-(--palette-background)"
+            rows={4}
+            className="w-full min-h-24 px-3 py-2 border-2 border-secondary rounded-2xl text-themed text-base font-mono bg-transparent placeholder:text-secondary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-(--palette-background) resize-y"
           />
-          <button
-            type="button"
+          <PrimaryButton
             onClick={onCustomSubmit}
             disabled={isWaitingForPayload || !customInputValue.trim()}
             aria-label="Submit your story action"
-            className="sm:w-32 px-4 py-2 rounded-2xl font-mono text-base font-medium text-themed transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-(--palette-background) disabled:opacity-60 disabled:cursor-not-allowed"
-            style={{
-              backgroundColor:
-                "color-mix(in srgb, #4b9b6a 35%, var(--palette-background) 65%)",
-              borderColor:
-                "color-mix(in srgb, #4b9b6a 80%, var(--palette-primary) 20%)",
-              borderWidth: 2,
-              borderStyle: "solid",
-            }}
+            className="sm:w-32"
           >
             Submit
-          </button>
+          </PrimaryButton>
         </div>
       ) : null}
     </section>
@@ -236,11 +244,63 @@ export function StoryBuddyConnecting() {
   return (
     <div
       className="min-h-[400px] border-2 border-secondary rounded-3xl p-8 flex flex-col items-center justify-center text-center space-y-4"
-      style={{
-        backgroundColor:
-          "color-mix(in srgb, var(--palette-background) 96%, var(--palette-secondary) 4%)",
-      }}
+      style={{ backgroundColor: PANEL_BG.subtle }}
     >
+      <div className="inline-flex items-center justify-center rounded-full border-2 border-primary/70 px-4 py-2">
+        <span className="mr-3 inline-block h-8 w-8 rounded-full border-4 border-secondary/60 border-t-primary animate-spin motion-reduce:animate-none" />
+        <span className="font-mono text-themed text-base">
+          Connecting to Story Buddy…
+        </span>
+      </div>
+      <p className="text-secondary text-sm max-w-xl">
+        Setting up your story space. This usually takes just a moment.
+      </p>
+    </div>
+  );
+}
+
+type LoadingOrErrorPanelProps = {
+  errorMessage: string | null;
+  onTryAgain: () => void;
+};
+
+/** Same space as loading: shows spinner or error + Try again. */
+export function LoadingOrErrorPanel({
+  errorMessage,
+  onTryAgain,
+}: LoadingOrErrorPanelProps) {
+  const containerClass =
+    "min-h-[400px] border-2 border-secondary rounded-3xl p-8 flex flex-col items-center justify-center text-center space-y-4";
+  const containerStyle = { backgroundColor: PANEL_BG.subtle };
+
+  if (errorMessage) {
+    return (
+      <div className={containerClass} style={containerStyle}>
+        <h2 className="font-mono font-bold text-red-600 dark:text-red-400 text-lg">
+          Something went wrong
+        </h2>
+        <p className="text-themed text-sm font-mono max-w-xl whitespace-pre-wrap">
+          {errorMessage}
+        </p>
+        <button
+          type="button"
+          onClick={onTryAgain}
+          className="rounded-2xl border-2 px-4 py-2 font-mono text-base text-themed focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          style={{
+            backgroundColor:
+              "color-mix(in srgb, #4b9b6a 35%, var(--palette-background) 65%)",
+            borderColor:
+              "color-mix(in srgb, #4b9b6a 80%, var(--palette-primary) 20%)",
+          }}
+        >
+          Try again
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className={containerClass} style={containerStyle}>
       <div className="inline-flex items-center justify-center rounded-full border-2 border-primary/70 px-4 py-2">
         <span className="mr-3 inline-block h-8 w-8 rounded-full border-4 border-secondary/60 border-t-primary animate-spin motion-reduce:animate-none" />
         <span className="font-mono text-themed text-base">
@@ -271,10 +331,7 @@ export function WelcomeOverlay({
     <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
       <div
         className="rounded-3xl border-[3px] border-primary px-5 py-4 flex items-start min-h-0"
-        style={{
-          backgroundColor:
-            "color-mix(in srgb, var(--palette-background) 94%, var(--palette-secondary) 6%)",
-        }}
+        style={{ backgroundColor: PANEL_BG.default }}
       >
         <div className="space-y-2">
           <h2 className="font-mono font-bold text-themed text-lg">Overview</h2>
@@ -301,10 +358,7 @@ export function WelcomeOverlay({
       </div>
       <div
         className="rounded-3xl border-2 border-secondary px-5 py-4 flex items-start min-h-0 overflow-y-auto"
-        style={{
-          backgroundColor:
-            "color-mix(in srgb, var(--palette-background) 97%, var(--palette-secondary) 3%)",
-        }}
+        style={{ backgroundColor: PANEL_BG.message }}
       >
         <div className="space-y-2">
           <h2 className="font-mono font-bold text-themed text-lg">
@@ -323,10 +377,7 @@ export function WelcomeOverlay({
       </div>
       <div
         className="rounded-3xl border-2 border-secondary px-5 py-4 flex items-start min-h-0"
-        style={{
-          backgroundColor:
-            "color-mix(in srgb, var(--palette-background) 97%, var(--palette-secondary) 3%)",
-        }}
+        style={{ backgroundColor: PANEL_BG.message }}
       >
         <div className="space-y-2">
           <h2 className="font-mono font-bold text-themed text-lg">Example</h2>
@@ -343,10 +394,7 @@ export function WelcomeOverlay({
       </div>
       <div
         className="rounded-3xl border-2 border-secondary px-5 py-4 flex flex-col min-h-0 overflow-hidden"
-        style={{
-          backgroundColor:
-            "color-mix(in srgb, var(--palette-background) 97%, var(--palette-secondary) 3%)",
-        }}
+        style={{ backgroundColor: PANEL_BG.message }}
       >
         {embedTargetRef && (
           <div
@@ -356,29 +404,19 @@ export function WelcomeOverlay({
         )}
       </div>
       <div className="md:col-span-2 flex flex-col sm:flex-row gap-3">
-        <button
-          type="button"
+        <PrimaryButton
           onClick={onStartNewStory}
           disabled={!gameReady}
-          className="flex-1 rounded-3xl border-2 px-6 py-3 font-mono text-base text-themed transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-(--palette-background) disabled:opacity-60 disabled:cursor-not-allowed"
-          style={{
-            backgroundColor:
-              "color-mix(in srgb, #4b9b6a 35%, var(--palette-background) 65%)",
-            borderColor:
-              "color-mix(in srgb, #4b9b6a 80%, var(--palette-primary) 20%)",
-          }}
+          className="flex-1 rounded-3xl px-6 py-3"
         >
           Start a new story
-        </button>
+        </PrimaryButton>
         <button
           type="button"
           onClick={onContinueStory}
           disabled={!gameReady}
           className="flex-1 rounded-3xl border-2 border-secondary px-6 py-3 font-mono text-base text-themed transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-(--palette-background) disabled:opacity-60 disabled:cursor-not-allowed"
-          style={{
-            backgroundColor:
-              "color-mix(in srgb, var(--palette-background) 90%, var(--palette-secondary) 10%)",
-          }}
+          style={{ backgroundColor: getCardBg() }}
         >
           Continue a story
         </button>
@@ -387,14 +425,68 @@ export function WelcomeOverlay({
   );
 }
 
-/** Opening prompt for new story: static options + write your own. */
-const OPENING_BEATS = [
-  "a strange meeting",
-  "an unexpected letter",
-  "waking up somewhere unfamiliar",
-] as const;
+type ErrorOverlayProps = {
+  message: string;
+  onTryAgain: () => void;
+};
+
+export function ErrorOverlay({ message, onTryAgain }: ErrorOverlayProps) {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
+  const overlay = (
+    <div
+      className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+      aria-modal
+      aria-labelledby="error-overlay-title"
+      role="alertdialog"
+    >
+      <div
+        className="absolute inset-0 z-0 bg-black/50"
+        onClick={onTryAgain}
+        onKeyDown={(e) => e.key === "Escape" && onTryAgain()}
+        aria-hidden
+      />
+      <div
+        className="relative z-10 rounded-3xl border-2 border-red-500/80 px-6 py-5 max-w-md shadow-xl"
+        style={{ backgroundColor: PANEL_BG.default }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2
+          id="error-overlay-title"
+          className="font-mono font-bold text-red-600 dark:text-red-400 text-lg mb-2"
+        >
+          Something went wrong
+        </h2>
+        <p className="text-themed text-sm font-mono mb-4 whitespace-pre-wrap">
+          {message}
+        </p>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onTryAgain();
+          }}
+          className="rounded-2xl border-2 px-4 py-2 font-mono text-base text-themed focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+          style={{
+            backgroundColor:
+              "color-mix(in srgb, #4b9b6a 35%, var(--palette-background) 65%)",
+            borderColor:
+              "color-mix(in srgb, #4b9b6a 80%, var(--palette-primary) 20%)",
+          }}
+        >
+          Try again
+        </button>
+      </div>
+    </div>
+  );
+
+  if (!mounted || typeof document === "undefined") return null;
+  return createPortal(overlay, document.body);
+}
 
 type OpeningPromptProps = {
+  choicesList: [string, string, string];
   onSelectBeat: (beat: string) => void;
   onWriteYourOwn: () => void;
   customInputValue: string;
@@ -403,9 +495,11 @@ type OpeningPromptProps = {
   wordCountMessage: string;
   isSubmitting: boolean;
   customInputRef: React.RefObject<HTMLInputElement | null>;
+  customInputPlaceholder?: string;
 };
 
 export function OpeningPrompt({
+  choicesList,
   onSelectBeat,
   customInputValue,
   onCustomInputChange,
@@ -413,14 +507,12 @@ export function OpeningPrompt({
   wordCountMessage,
   isSubmitting,
   customInputRef,
+  customInputPlaceholder = "8–21 words",
 }: OpeningPromptProps) {
   return (
-    <section
+    <Panel
+      as="section"
       className="border-2 border-secondary rounded-3xl p-6 flex flex-col gap-4"
-      style={{
-        backgroundColor:
-          "color-mix(in srgb, var(--palette-background) 94%, var(--palette-secondary) 6%)",
-      }}
     >
       <h2 className="font-mono font-bold text-themed text-lg">
         Where does your story begin?
@@ -430,17 +522,14 @@ export function OpeningPrompt({
         to get started:
       </p>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        {OPENING_BEATS.map((beat) => (
+        {choicesList.map((beat, i) => (
           <button
-            key={beat}
+            key={beat ? `beat-${i}-${beat.slice(0, 20)}` : `beat-${i}`}
             type="button"
             onClick={() => onSelectBeat(beat)}
             disabled={isSubmitting}
             className="text-left px-4 py-3 border-2 border-primary rounded-2xl text-themed text-sm font-mono hover:bg-(--palette-primary)/14 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-            style={{
-              backgroundColor:
-                "color-mix(in srgb, var(--palette-background) 90%, var(--palette-secondary) 10%)",
-            }}
+            style={{ backgroundColor: getCardBg() }}
           >
             {beat}
           </button>
@@ -456,23 +545,15 @@ export function OpeningPrompt({
             onChange={(e) => onCustomInputChange(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && onSubmitCustom()}
             disabled={isSubmitting}
-            placeholder="8–18 words"
+            placeholder={customInputPlaceholder}
             className="flex-1 px-3 py-2 border-2 border-secondary rounded-2xl text-themed text-base font-mono bg-transparent placeholder:text-secondary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
           />
-          <button
-            type="button"
+          <PrimaryButton
             onClick={onSubmitCustom}
             disabled={isSubmitting || !customInputValue.trim()}
-            className="px-4 py-2 rounded-2xl font-mono text-base font-medium text-themed border-2 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-            style={{
-              backgroundColor:
-                "color-mix(in srgb, #4b9b6a 35%, var(--palette-background) 65%)",
-              borderColor:
-                "color-mix(in srgb, #4b9b6a 80%, var(--palette-primary) 20%)",
-            }}
           >
             {isSubmitting ? "…" : "Start"}
-          </button>
+          </PrimaryButton>
         </div>
         {wordCountMessage && (
           <span className="text-xs font-mono text-secondary">
@@ -480,7 +561,7 @@ export function OpeningPrompt({
           </span>
         )}
       </div>
-    </section>
+    </Panel>
   );
 }
 
@@ -495,11 +576,13 @@ type RefinementPanelProps = {
   onAddToStory: () => void;
   agencyLocked: boolean;
   isSubmitting: boolean;
+  refineWordMin?: number;
+  refineWordMax?: number;
+  onClearEditable?: () => void;
 };
 
 export function RefinementPanel({
   renderings,
-  renderingTones,
   selectedIndex,
   onSelectRendering,
   editableValue,
@@ -508,19 +591,21 @@ export function RefinementPanel({
   onAddToStory,
   agencyLocked,
   isSubmitting,
+  refineWordMin = 15,
+  refineWordMax = 25,
+  onClearEditable,
 }: RefinementPanelProps) {
   return (
     <section
       className="border-2 border-secondary rounded-3xl p-4 flex flex-col gap-3 flex-1 min-h-0"
       aria-label="Refine your sentence"
-      style={{
-        backgroundColor:
-          "color-mix(in srgb, var(--palette-background) 94%, var(--palette-secondary) 6%)",
-      }}
+      style={{ backgroundColor: PANEL_BG.default }}
     >
-      <h2 className="font-mono font-bold text-themed text-lg shrink-0">
-        Here&apos;s how that could sound
-      </h2>
+      <MessageBlock className="shrink-0">
+        <p className="text-themed text-2xl leading-relaxed font-mono font-medium">
+          Here&apos;s how that could sound
+        </p>
+      </MessageBlock>
       {agencyLocked && (
         <p className="text-sm text-secondary font-mono shrink-0">
           Two turns left. The choices are set — pick one.
@@ -536,18 +621,8 @@ export function RefinementPanel({
             className={`text-left px-4 py-3 border-2 rounded-2xl text-themed text-sm font-mono transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary ${
               selectedIndex === i ? "border-primary" : "border-secondary"
             }`}
-            style={{
-              backgroundColor:
-                selectedIndex === i
-                  ? "color-mix(in srgb, var(--palette-primary) 20%, var(--palette-background) 80%)"
-                  : "color-mix(in srgb, var(--palette-background) 90%, var(--palette-secondary) 10%)",
-            }}
+            style={{ backgroundColor: getCardBg(selectedIndex === i) }}
           >
-            {renderingTones[i] && (
-              <span className="block text-xs text-secondary mb-1">
-                {renderingTones[i]}
-              </span>
-            )}
             {renderings[i] || "—"}
           </button>
         ))}
@@ -555,16 +630,27 @@ export function RefinementPanel({
       {!agencyLocked && (
         <>
           <p className="text-xs text-themed font-mono shrink-0">
-            Pick one, or edit below (15–25 words):
+            Pick one, or edit below ({refineWordMin}–{refineWordMax} words):
           </p>
-          <textarea
-            value={editableValue}
-            onChange={(e) => onEditableChange(e.target.value)}
-            disabled={isSubmitting}
-            rows={2}
-            className="w-full px-3 py-2 border-2 border-secondary rounded-2xl text-themed text-sm font-mono bg-transparent resize-none focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-            placeholder="Edit your sentence…"
-          />
+          <div className="flex flex-col gap-2">
+            <textarea
+              value={editableValue}
+              onChange={(e) => onEditableChange(e.target.value)}
+              disabled={isSubmitting}
+              rows={5}
+              className="w-full px-3 py-2 border-2 border-secondary rounded-2xl text-themed text-sm font-mono bg-transparent resize-none focus:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              placeholder="Edit your sentence…"
+            />
+            {onClearEditable && (
+              <SecondaryButton
+                onClick={onClearEditable}
+                disabled={isSubmitting || !editableValue.trim()}
+                className="self-start"
+              >
+                Clear input
+              </SecondaryButton>
+            )}
+          </div>
           {wordCountMessage && (
             <span className="text-xs font-mono text-secondary">
               {wordCountMessage}
@@ -572,21 +658,13 @@ export function RefinementPanel({
           )}
         </>
       )}
-      <button
-        type="button"
+      <PrimaryButton
         onClick={onAddToStory}
         disabled={isSubmitting}
-        className="shrink-0 rounded-2xl border-2 px-4 py-2 font-mono text-base font-medium text-themed focus:outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-60"
-        style={{
-          backgroundColor:
-            "color-mix(in srgb, #4b9b6a 35%, var(--palette-background) 65%)",
-          borderColor:
-            "color-mix(in srgb, #4b9b6a 80%, var(--palette-primary) 20%)",
-        }}
+        className="shrink-0"
       >
         Add to my story →
-      </button>
+      </PrimaryButton>
     </section>
   );
 }
-

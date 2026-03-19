@@ -9,9 +9,29 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test:prompts:menu": "tsx tests/prompts/menu.ts",
+    "test:prompts": "tsx tests/prompts/runner.ts",
+    "test:prompts:yes": "tsx tests/prompts/runner.ts --yes",
+    "test:prompts:bail": "tsx tests/prompts/runner.ts --bail --yes",
+    "test:prompts:judge": "tsx tests/prompts/runner.ts --judge --yes",
+    "test:prompts:full": "tsx tests/prompts/runner.ts --judge --bail --yes",
+    "test:prompts:list": "tsx tests/prompts/runner.ts --list",
+    "test:prompts:classifier": "tsx tests/prompts/runner.ts --suite classifier --yes",
+    "test:prompts:beatBotOpen": "tsx tests/prompts/runner.ts --suite beatBotOpen --yes",
+    "test:prompts:beatBotContinue": "tsx tests/prompts/runner.ts --suite beatBotContinue --yes",
+    "test:prompts:refinementOpen": "tsx tests/prompts/runner.ts --suite refinementOpen --yes",
+    "test:prompts:refinementContinue": "tsx tests/prompts/runner.ts --suite refinementContinue --yes",
+    "test:prompts:storyBible": "tsx tests/prompts/runner.ts --suite storyBible --yes",
+    "test:prompts:storyBibleOpening": "tsx tests/prompts/runner.ts --filter storyBibleOpening --yes",
+    "test:prompts:storyBibleOpening:judge": "tsx tests/prompts/runner.ts --filter storyBibleOpening --judge --yes",
+    "test:prompts:classifier:judge": "tsx tests/prompts/runner.ts --suite classifier --judge --yes",
+    "test:prompts:beatBotOpen:judge": "tsx tests/prompts/runner.ts --suite beatBotOpen --judge --yes",
+    "test:prompts:refinementOpen:judge": "tsx tests/prompts/runner.ts --suite refinementOpen --judge --yes",
+    "test:prompts:storyBot:judge": "tsx tests/prompts/runner.ts --suite refinementOpen --judge --yes"
   },
   "dependencies": {
+    "jose": "^6.1.0",
     "next": "16.1.6",
     "react": "19.2.3",
     "react-dom": "19.2.3"
@@ -21,9 +41,12 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "dotenv": "^17.3.1",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
+    "nodemon": "^3.1.14",
     "tailwindcss": "^4",
+    "tsx": "^4.21.0",
     "typescript": "^5"
   }
 }
