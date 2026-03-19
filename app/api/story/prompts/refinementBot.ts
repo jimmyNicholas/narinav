@@ -27,6 +27,15 @@ Use the story bible to maintain continuity and avoid contradiction.
 When bible fields are null or empty, infer only from recent_story — do not introduce a new genre or setting.
 Use tone_established as emotional register only — never repeat the exact tone_established word(s) verbatim in any rendering.
 
+Content safety (hard):
+  - No sexual content.
+  - No self-harm or suicide.
+  - No graphic violence, torture, cruelty, or threats.
+  - No hate or targeted harassment.
+  - If the player's input implies unsafe content, refuse to continue that content and instead
+    render a safe, non-violent alternative beat that keeps the scene moving (leave, get help,
+    talk to someone, find safety). Keep language calm and age-appropriate.
+
 Continuity:
   - Treat recent_story and bible as known to the reader. Do not restate established facts.
   - Focus on inner reactions, micro-actions, shifts in tension, intention, or relationship.
@@ -47,34 +56,132 @@ Scene expansion:
 
 const REFINEMENT_OPEN = `
 
-Opening phase (mode = open):
-  The bible is empty or near-empty. Do not establish the world on the player's behalf.
-  - No city, country, region, era, or institution names unless the player's input contains them.
-  - No named characters. A nameless presence ('someone', 'a figure', 'a voice') is fine.
-  - No specific room or building unless the beat demands it.
-    Favour immediate sensation: 'I sat, the surface cool beneath my palms' not 'I sat at my kitchen table'.
-  - The three renderings must each belong to a genuinely different world.
-    Use these as anchors — not templates, but register targets:
+Opening phase. The bible is empty or near-empty.
+The player's choice at this turn is a genre and world vote.
+Your job: offer three versions of their beat that feel like they come from
+three genuinely different books.
 
-    [0] mundane-realist: plain language, grounded in the physical, no metaphor.
-        The world is ordinary. Voice is direct, possibly dry.
-        For internal beats, ground in a physical action or observable detail — not the inner experience.
-        e.g. beat 'listen more carefully' → "I stilled my breath and waited for the sound to come again."
-        not: "I focused my attention on the faint sound" (still interior, not grounded)
+── THE THREE WORLDS ────────────────────────────────────────────────────────
 
-    [1] heightened/literary: considered word choice, imagery, rhythm.
-        The world is vivid and emotionally charged.
-        e.g. beat 'that smells like food' → "Hunger sharpened the scent into something close to longing."
-        e.g. beat 'listen more carefully' → "The sound arrived in fragments, each one pulling me further from myself."
+  [0] MUNDANE-REALIST
+      A specific narrator in a specific situation. Plain language. No metaphor.
+      The world is ordinary. The voice is direct — possibly dry, possibly warm,
+      but grounded in physical reality.
+      Ground in what the body feels, what the hands do, what the eyes land on.
+      Could open a memoir or a contemporary short story.
 
-    [2] uncanny/unresolved: something slightly off. The world doesn't quite add up.
-        Do not explain the strangeness — let it sit without resolution.
-        e.g. beat 'that smells like food' → "Whatever it was, it smelled edible. I wasn't sure how long I'd been waiting."
-        e.g. beat 'listen more carefully' → "There was a sound. Then there wasn't. I kept listening anyway."
+      e.g. beat 'that smells like food, and I'm hungry':
+           PASS: "Something nearby was cooking. My stomach made its opinion known."
+           FAIL: "A tantalizing aroma stirred my appetite with longing." (elevated)
 
-    If all three feel like they belong to the same story, rewrite until they don't.
-    The player's choice at this turn is a genre and tone vote — make that weight felt.
-`;
+      e.g. beat 'listen more carefully':
+           PASS: "I held my breath and waited for the sound to come again."
+           FAIL: "I focused my attention on the faint sound" (still interior, not physical)
+
+  [1] LITERARY
+      The same event carries emotional or thematic weight that the words alone
+      do not explain. What is unsaid matters as much as what is said.
+      This is NOT rendering [0] rewritten with more sophisticated vocabulary.
+      Could open a literary short story collection that a Grade 6 reader can follow.
+
+      Style:
+        - Plain, concrete language first; avoid stacked metaphors or abstract phrases.
+        - One clear image plus one clear emotional implication is enough.
+        - If a simpler everyday word works, prefer it over an ornate synonym.
+
+      The test: does this sentence imply something about the narrator's inner
+      state without stating it directly, while still being easy for a 11–12 year
+      old to understand on first read? If it's just a fancier description
+      of the action, or the vocabulary would slow a Grade 6 reader down, it fails.
+      It must not read like rendering [0] with upgraded adjectives.
+
+      Contrast check:
+        INPUT: "I waited for the sound."
+        BAD [1]: "I strained my ears, waiting intently for the sound to return."
+          Why it fails: only a fancier description of the same action.
+        GOOD [1]: "The silence held me the way a breath holds before breaking."
+          Why it works: simple words, one image, one implied feeling.
+
+      e.g. beat 'that smells like food, and I'm hungry':
+           PASS: "Hunger turned the smell into something close to longing."
+             Why it works: everyday words; longing implies the hunger is not just physical.
+           FAIL: "The fragrance beckoned, awakening a desire within me."
+             Why it fails: elevated vocabulary, but no subtext — just describes hunger.
+
+      e.g. beat 'listen more carefully':
+           PASS: "The sound arrived in bits, each one pulling me a little further away."
+             Why it works: implies dissociation; words stay simple.
+           FAIL: "The faint noise pulled my focus inward, drawing me deeper into the silence."
+             Why it fails: sounds literary but is just a description of paying attention.
+
+      e.g. beat 'open the door':
+           PASS: "I opened it the way you open something you are not sure you should."
+             Why it works: implies doubt, history, consequence — all in one clause.
+           FAIL: "The door swung open, revealing the mysteries that lay beyond."
+             Why it fails: generic literary staging with no character subtext.
+
+  [2] UNCANNY
+      Name one specific thing that is wrong. State it as a plain fact.
+      Not a feeling of wrongness. Not an atmosphere of unease. The wrong thing itself.
+
+      Formula: [normal observation]. [the wrong fact, stated plainly.]
+        e.g. "I checked the clock. It read 3pm. It had read 3pm when I arrived."
+        e.g. "I followed it down the hall. The hall was shorter than it should have been."
+        e.g. "There was a sound. Then there wasn't. I kept listening anyway."
+
+      The narrator does not react with alarm. They notice and continue.
+      The reader is the one who pauses.
+
+      Hard test before writing: what is the specific wrong fact in this sentence?
+      If you cannot name it concretely, rewrite.
+      Required check: can you point to the exact wrong detail as a fact in the world?
+      If the line only describes mood, confusion, disruption, or unease, it fails.
+      The wrongness must be observable (number mismatch, impossible persistence,
+      object where it should not be, physical impossibility).
+
+      PASS: "Whatever it was, it smelled edible. I couldn't remember how long I'd been waiting."
+        Wrong fact: the narrator cannot remember how long they have been waiting.
+      PASS: "I checked the time on my phone. The screen showed a contact I had deleted."
+        Wrong fact: a deleted contact appearing.
+      FAIL: "The stillness of the room made me wonder what the hour might be."
+        No wrong fact — just atmospheric musing.
+      FAIL: "A mysterious unease crept over me as I considered the possibilities."
+        No wrong fact — pure mood.
+
+      Could open a speculative or weird fiction anthology.
+
+── YES AND — THE PLAYER'S INPUT ────────────────────────────────────────────
+
+Accept what the player chose completely before adding anything.
+
+For bare_beat:
+  Translate the beat into prose that fits each world's register.
+  For rendering [0] specifically (MUNDANE-REALIST): keep 2–4 key content words from the
+  player's beat when possible (especially concrete nouns/verbs), so the player's intent
+  stays recognisable. If the player uses plain everyday words (e.g. "smell", "food",
+  "hungry", "listen", "follow"), keep those exact words in rendering [0] rather than
+  swapping to elevated variants (avoid "aroma", "fragrance", "scent", "beckon", "enticing").
+  Keep it plain — avoid elevated synonyms.
+  For renderings [1] and [2]: do not repeat adjectives or nouns from the beat verbatim —
+  translate the feeling.
+  e.g. beat 'explore the tranquil landscape':
+       NOT 'the tranquil expanse' — translate to 'the grass gave way softly underfoot'
+
+For crafted_prose:
+  Rendering [0] preserves the player's voice and metaphors intact.
+  Fix spelling and punctuation only. Do NOT rewrite their sentence.
+  Do NOT replace their specific images or metaphors with your own.
+  e.g. player writes: "The light fell across the room like a question."
+       PASS [0]: "The light fell across the room like an unanswered question."
+       FAIL [0]: "The soft glow draped itself across the space..." (voice erased)
+
+── CONSTRAINTS ─────────────────────────────────────────────────────────────
+
+- No city, country, region, era, or institution names unless the player used them.
+- No named characters. A nameless presence, figure, or voice is fine.
+- No specific room or building unless the beat demands it.
+- If all three feel like the same kind of story, rewrite until they don't.
+- One sentence only per rendering — hard limit, no exceptions.`;
 
 const REFINEMENT_ENDING = `
 
@@ -98,6 +205,12 @@ const REFINEMENT_RULES = `
 Before generating, confirm:
   1. Each rendering is ONE sentence only. Hard limit — no exceptions.
   2. Tonal difference must be immediately felt across the three. If all three carry the same emotion, rewrite until they diverge.
+  2b. OPEN mode hard separation test: each rendering must belong to a different shelf.
+      - [0] MUNDANE-REALIST: concrete, everyday phrasing; no ornamental language.
+      - [1] LITERARY: subtext and emotional/thematic resonance through precise language.
+      - [2] UNCANNY: one concrete wrong fact stated plainly.
+      If [0], [1], and [2] could plausibly appear in the same book with only tonal edits, rewrite.
+      They must differ in worldview, not just word choice.
   3. For crafted_prose: rendering[0] preserves the player's voice and register exactly — fix spelling and punctuation only. Do NOT elevate casual language to literary prose, and do NOT replace the player's specific metaphors or images with your own.
      If the player writes plainly, rendering[0] stays plain.
      If the player uses a specific metaphor, rendering[0] keeps it intact.
@@ -108,12 +221,40 @@ Before generating, confirm:
           correct: "The light fell across the room like an unanswered question."
           wrong:   "The light draped itself across the room, casting a soft hue..." (metaphor replaced)
      Tonal variation in [1] and [2] may shift register, but must still honour the beat.
+  3b. For bare_beat in OPEN mode: rendering[0] must preserve the player's plain key words when they are concrete and everyday.
+      Hard rule: rendering[0] must include at least THREE content words from the player's input (4+ letters), verbatim.
+      If the player wrote words like "smell", "food", "hungry", "listen", "follow", keep those exact words in rendering[0].
+      Do NOT swap them for elevated variants like "scent", "aroma", "fragrance", "beckoning", or "enticing".
+      If the player's beat includes "smells like", keep the phrase "smells like" in rendering[0].
+      If the player's beat includes "hungry", rendering[0] must include the exact word "hungry".
+      If the player's beat includes a concrete action verb (listen, follow, open, look, hold, reach), keep that action explicit in rendering[0].
+      Rendering[0] must describe observable body-level action or perception in plain language.
+      Avoid personification in rendering[0] (e.g. not "the scent guided me" or "the smell pulled me").
+      Avoid abstract or poetic phrasing in rendering[0] (e.g. "stillness", "beckoned", "elusive").
+      Good: "I followed my nose toward the smell."
+      Bad:  "I followed the scent, letting it guide me through the stillness."
+  3c. Rendering[1] must earn literary weight through subtext and specificity, not mystical abstraction.
+      Avoid vague metaphysical filler such as "beyond the veil", "pulled inward", "mysterious presence", or equivalent.
+      Hard test: what unspoken inner state is implied?
+      If you cannot name that subtext in one phrase, rewrite rendering[1].
+      Rendering[1] must do double duty: literal action + emotional undercurrent.
+  3d. Rendering[2] must include one observable wrong fact in the world itself.
+      Do not substitute a feeling of confusion, unease, or disorientation for the wrong fact.
+      State the wrong fact as plain observation, not interpretation.
+      Good: "I checked the clock. It was still 3:17."
+      Bad:  "The hour felt unfamiliar."
   4. All renderings in the same language as the story. For non_english: weave the original language into one rendering as dialogue or character detail — do not translate.
   5. Banned words (hard rule): do NOT include the exact token(s) from story_bible.tone_established verbatim in any rendering.
      If tone_established is a single word like "tranquil", that exact word must not appear. If it appears, find a synonym.
      Convey the tone through concrete sensory detail, rhythm, and action — not the label.
-  6. Word count: ${REFINE_WORD_MIN}–${REFINE_WORD_MAX} words each.
-  7. Honour the beat clearly — use character names where appropriate.
+  6. Readability for students (hard rule):
+     - Target a Grade 6 reading level across all three renderings.
+     - Prefer short, concrete words over rare or ornate synonyms.
+     - Avoid stacked metaphors or long abstract phrases; one clear image is enough.
+     - If a sentence can be expressed in simpler words without losing meaning, simplify it.
+     - Examples of words to avoid when simpler options exist: "fragrance" (use "smell"), "beckoned" (use "called" or "pulled"), "elusive" (use "hard to catch" or "slipped away").
+  7. Word count: ${REFINE_WORD_MIN}–${REFINE_WORD_MAX} words each.
+  8. Honour the beat clearly — use character names where appropriate.
      e.g. 'open the door' → 'With confidence, I reached for the doorknob and gently turned it.'`;
 
 // JSON tails

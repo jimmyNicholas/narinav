@@ -8,13 +8,13 @@ export const DECISION_MOMENT_2 = 0.8;
 export const ENDING_TURNS = 5;
 export const CONTINUE_TURNS = 8;
 export const OPENING_TURNS = 3;
-export const CONTEXT_SWITCH_TURN = 8;
+export const CONTEXT_SWITCH_TURN = 3;
 export const AGENCY_LOCK_THRESHOLD = 2;
 
-export const BEAT_WORD_MIN = 8;
-export const BEAT_WORD_MAX = 18;
-export const REFINE_WORD_MIN = 15;
-export const REFINE_WORD_MAX = 25;
+export const BEAT_WORD_MIN = 6;
+export const BEAT_WORD_MAX = 12;
+export const REFINE_WORD_MIN = 12;
+export const REFINE_WORD_MAX = 20;
 /** Max words for the moral (ending bot). */
 export const MORAL_WORD_MAX = 20;
 

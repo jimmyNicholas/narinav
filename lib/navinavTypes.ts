@@ -27,6 +27,14 @@ export type StoryBibleThread = {
   status: ThreadStatus;
 };
 
+export type StoryBibleNarrator = {
+  voice: string | null;
+  register: "mundane" | "literary" | "uncanny" | "playful" | null;
+  interiority: "high" | "low" | null;
+};
+
+export type StoryBibleTrajectory = "inward" | "outward" | "relational";
+
 export type StoryBibleMeta = {
   /** High-level genre label, e.g. 'cozy mystery', 'solar punk coming-of-age'. */
   genre?: string | null;
@@ -75,6 +83,11 @@ export type StoryBible = {
   /** Single thread that is most urgent/important for the story right now. */
   primary_thread: string | null;
   cliffhanger_summary: string | null;
+
+  narrator?: StoryBibleNarrator | null;
+  trajectory?: StoryBibleTrajectory | null;
+  opening_complete?: boolean;
+  missing?: string[];
 };
 
 export type StoryBibleUpdate = Partial<{
@@ -90,6 +103,11 @@ export type StoryBibleUpdate = Partial<{
   threads: StoryBibleThread[];
   primary_thread: string | null;
   cliffhanger_summary: string | null;
+
+  narrator: StoryBibleNarrator | null;
+  trajectory: StoryBibleTrajectory | null;
+  opening_complete: boolean;
+  missing: string[];
 }>;
 
 export function createEmptyStoryBible(): StoryBible {
@@ -106,6 +124,11 @@ export function createEmptyStoryBible(): StoryBible {
     threads: [],
     primary_thread: null,
     cliffhanger_summary: null,
+
+    narrator: null,
+    trajectory: null,
+    opening_complete: false,
+    missing: [],
   };
 }
 
@@ -133,6 +156,11 @@ export function normalizeStoryBible(bible: Partial<StoryBible>): StoryBible {
     places: Array.isArray(bible.places) ? bible.places : [],
     objects: Array.isArray(bible.objects) ? bible.objects : [],
     cliffhanger_summary: bible.cliffhanger_summary ?? null,
+
+    narrator: bible.narrator ?? null,
+    trajectory: bible.trajectory ?? null,
+    opening_complete: bible.opening_complete ?? false,
+    missing: Array.isArray(bible.missing) ? bible.missing : [],
   };
   if (Array.isArray(bible.threads) && bible.threads.length > 0) {
     return {
@@ -184,6 +212,12 @@ export function mergeStoryBible(
     next.cliffhanger_summary = delta.cliffhanger_summary;
 
   if (delta.primary_thread !== undefined) next.primary_thread = delta.primary_thread;
+
+  if (delta.narrator !== undefined) next.narrator = delta.narrator;
+  if (delta.trajectory !== undefined) next.trajectory = delta.trajectory;
+  if (delta.opening_complete !== undefined)
+    next.opening_complete = delta.opening_complete;
+  if (delta.missing !== undefined) next.missing = delta.missing;
 
   if (delta.characters !== undefined) {
     const byName = new Map(current.characters.map((c) => [c.name, c]));

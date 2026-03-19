@@ -1,4 +1,6 @@
 import { NextResponse } from "next/server";
+import { cookies } from "next/headers";
+import { getAuthCookieName, verifyAuthToken } from "@/lib/auth";
 import {
   CONTEXT_SWITCH_TURN,
   DEV_MODE_MODEL,
@@ -54,6 +56,12 @@ function getEndingPressure(turnsRemaining: number | null): number {
   return 3;
 }
 
+function isOpeningComplete(bible: StoryBible, turnCount: number): boolean {
+  if (turnCount >= OPENING_TURNS) return true;
+  if (bible.opening_complete === true) return true;
+  return false;
+}
+
 function ensureTriple<T>(arr: unknown[], def: T): [T, T, T] {
   const a = Array.isArray(arr) ? arr : [];
   return [
@@ -97,6 +105,7 @@ const STORY_BIBLE_UPDATE_KEYS = new Set([
   "title", "summary", "tone_established", "meta", "style_guidelines",
   "rules_of_world", "characters", "places", "objects", "threads",
   "primary_thread", "cliffhanger_summary",
+  "narrator", "trajectory", "opening_complete", "missing",
 ]);
 
 function parseStoryBibleUpdateResponse(text: string): StoryBibleUpdate | null {
@@ -125,6 +134,42 @@ function parseStoryBibleUpdateResponse(text: string): StoryBibleUpdate | null {
     if (Array.isArray(update.characters)) out.characters = update.characters as StoryBible["characters"];
     if (Array.isArray(update.places)) out.places = update.places as StoryBible["places"];
     if (Array.isArray(update.objects)) out.objects = update.objects as StoryBible["objects"];
+
+    if (update.narrator !== undefined) {
+      if (update.narrator === null) {
+        out.narrator = null;
+      } else if (update.narrator && typeof update.narrator === "object") {
+        const n = update.narrator as Record<string, unknown>;
+        const voice = typeof n.voice === "string" ? n.voice : n.voice === null ? null : null;
+        const registerRaw = n.register;
+        const register =
+          registerRaw === "mundane" ||
+          registerRaw === "literary" ||
+          registerRaw === "uncanny" ||
+          registerRaw === "playful"
+            ? registerRaw
+            : null;
+        const interiorityRaw = n.interiority;
+        const interiority =
+          interiorityRaw === "high" || interiorityRaw === "low" ? interiorityRaw : null;
+        out.narrator = { voice, register, interiority };
+      }
+    }
+
+    if (update.trajectory !== undefined) {
+      const t = update.trajectory;
+      out.trajectory = t === "inward" || t === "outward" || t === "relational" ? t : null;
+    }
+
+    if (update.opening_complete !== undefined) {
+      out.opening_complete = Boolean(update.opening_complete);
+    }
+
+    if (update.missing !== undefined) {
+      out.missing = Array.isArray(update.missing)
+        ? (update.missing.map((x) => String(x)) as string[])
+        : [];
+    }
 
     if (Array.isArray(update.threads)) {
       const threads: StoryBibleThread[] = [];
@@ -201,6 +246,12 @@ function parseRefinementBotResponse(
 }
 
 export async function POST(request: Request) {
+  const token = (await cookies()).get(getAuthCookieName())?.value;
+  const user = token ? await verifyAuthToken(token) : null;
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     return NextResponse.json(
@@ -282,20 +333,27 @@ export async function POST(request: Request) {
     const effectiveMode: BeatBotMode =
       mode === "ending" || mode === "chapter"
         ? (mode as BeatBotMode)
-        : totalTurnCount < OPENING_TURNS
-          ? "open"
-          : "continue";
+        : isOpeningComplete(storyBible, totalTurnCount)
+          ? "continue"
+          : "open";
     const beatMode = effectiveMode;
     const narrativePosition =
       maxTurns > 0 ? Math.min(1, totalTurnCount / maxTurns) : 0;
     const recentStory = getRecentStory(storySoFar, totalTurnCount);
-    const storyBibleStr = JSON.stringify(storyBible, null, 0);
+    // In open mode, strip threads and primary_thread from the bible payload.
+    // The Beat Bot open prompt must not see threads — they cause thread-chasing
+    // regardless of prompt instructions. Omitting them is cleaner than instructing.
+    const bibleForBeatBot =
+      effectiveMode === "open"
+        ? { ...storyBible, threads: [], primary_thread: null }
+        : storyBible;
+    const storyBibleStr = JSON.stringify(bibleForBeatBot, null, 0);
     try {
       const userContent = beatBotUser({
         storyBible: storyBibleStr,
         recentStory,
         narrativePosition,
-        mode,
+        mode: beatMode,
       });
       const text = await createMessage({
         apiKey,

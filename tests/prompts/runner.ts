@@ -6,6 +6,7 @@ import { refinementOpenTests } from "./tests/refinement.open";
 import { refinementContinueTests } from "./tests/refinement.continue";
 import { classifierTests } from "./tests/classifier";
 import { storyBibleTests } from "./tests/storyBible";
+import { storyBibleOpeningTests } from "./tests/storyBible.opening";
 import * as fs from "fs";
 import * as path from "path";
 import { createMessage, extractJson } from "../../app/api/story/anthropic";
@@ -106,6 +107,7 @@ const allTests: TestCase[] = [
   ...refinementContinueTests,
   ...classifierTests,
   ...storyBibleTests,
+  ...storyBibleOpeningTests,
 ];
 
 // ── Argument parsing ──────────────────────────────────────────────────────────
@@ -157,9 +159,15 @@ type SuiteKey =
 
 const SUITES: Record<SuiteKey, (t: TestCase) => boolean> = {
   classifier: (t) => t.tag === "classifier",
-  beatBotOpen: (t) => t.tag === "beatBot" && t.action === "beatBot" && t.id <= "T05",
+  beatBotOpen: (t) =>
+    t.tag === "beatBot" &&
+    t.action === "beatBot" &&
+    (t.id.startsWith("T-BO-") || t.id <= "T05"),
   beatBotContinue: (t) => t.tag === "beatBot" && t.action === "beatBot" && t.id >= "T06" && t.id <= "T08",
-  refinementOpen: (t) => t.tag === "storyBot" && t.action === "refinementBot" && t.id >= "T09" && t.id <= "T11",
+  refinementOpen: (t) =>
+    t.tag === "storyBot" &&
+    t.action === "refinementBot" &&
+    (t.id.startsWith("T-RO-") || (t.id >= "T09" && t.id <= "T11")),
   refinementContinue: (t) => t.tag === "storyBot" && t.action === "refinementBot" && t.id >= "T12" && t.id <= "T15",
   storyBible: (t) => t.tag === "storyBible",
 };

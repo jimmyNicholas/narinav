@@ -18,77 +18,169 @@ You receive:
   - narrative_position: 0.0 = start, 1.0 = end
 
 Return exactly THREE bare beat options.
-  - Short action phrases — not full sentences. ${BEAT_WORD_MIN}–${BEAT_WORD_MAX} words each.`;
+  - Short action phrases — not full sentences. ${BEAT_WORD_MIN}–${BEAT_WORD_MAX} words each.
+
+Kid-friendly rules (hard):
+  - Use simple, everyday verbs: look, go, take, open, ask, listen, follow, wait, hide, help.
+  - Avoid abstract phrasing (e.g. "reckon with", "consider the implications", "reflect on").
+  - Keep choices playable: something a kid can imagine doing right now.
+
+Content safety (hard):
+  - No sexual content.
+  - No self-harm or suicide.
+  - No graphic violence, torture, cruelty, or threats.
+  - No hate or targeted harassment.
+  - If recent_story implies unsafe content, steer to safe, non-violent, non-sexual alternatives
+    (get help, leave the area, talk to a trusted adult, calm down, find safety).`;
 
 // ---- Open (turns 0–2) ----
-// Route passes mode="open" for totalTurnCount <= 2.
-// Goal: establish atmosphere without locking in world details.
+// Route passes mode="open" for totalTurnCount <= OPENING_TURNS.
+// Goal: offer three genuinely different trajectories — not three moods.
+// The player's choice at this turn is a genre and world vote.
 
 const BEAT_BOT_OPEN = `
 
-The story is in its opening phase. Offer evocative hooks — not continuations.
+The story is beginning. Your job is to offer three beats that open three
+genuinely different stories — not three moods of the same one.
 
-Spatial rule: infer 1–2 spaces implied by confirmed places in the bible.
-  Use these as a soft boundary. If no places confirmed, keep beats sensation-only.
-  Do NOT commit to a specific location, name a room, or imply a fixed setting.
+── STEP 1: SELECT THREE PURPOSES ───────────────────────────────────────────
 
-Character rule: do NOT assume any character is present unless the bible confirms one.
-  When there are no confirmed characters, avoid third-person character phrasing:
-    - Do not use "he", "she", "they", "someone", "a man", "a woman", "a figure",
-      "his", "her", or "their".
-  In the absence of confirmed characters, describe only the environment,
-  sensations, or abstract shifts — no people at all.
+Choose three from this menu. Select the combination that offers the player
+the most divergent trajectories given what the story has established so far.
 
-Thread rule: even if the story_bible contains threads or a primary_thread
-  (e.g. "What is the source of the melody?"), do NOT answer, investigate, or
-  move toward resolving them in open mode. You may notice them, but beats must
-  not search, follow, or find the source of anything.
+  SENSATION   — something perceived: a smell, sound, texture, temperature
+  MEMORY      — something recalled: a name, feeling, moment from the past
+  IMPULSE     — a concrete physical action the narrator takes, not a vague
+                bodily sensation. The body moves, reaches, picks up, steps.
+                e.g. 'you pick up the envelope before deciding to'
+                NOT: 'your fingers twitch' (sensation, not action)
 
-Vary the three beats across:
-  - one sensation or perception (something noticed or felt)
-  - one internal or memory (something remembered or realised)
-  - one micro-action (something small done — no assumed place or person)
-    At least one beat must clearly describe a small physical action involving
-    the body or hands (e.g. reach, touch, pick up, set down, turn, step). Avoid
-    purely atmospheric verbs like "lingers", "tugs", or "drawn" in this beat.
+  INTRUSION   — something external happens that the narrator must respond to.
+                A clear event, not an ambient impression.
+                e.g. 'a knock at the door, three times'
+                NOT: 'a distant sound barely heard' (too vague to respond to)
+  ABSENCE     — something that should be there isn't, or has shifted
+  THRESHOLD   — a boundary about to be crossed: a door, a decision, a step
+  VOICE       — something spoken aloud, heard, or deliberately withheld
 
-Vary tone across:
-  - one lighter or hopeful
-  - one neutral or curious
-  - one carrying faint tension, strangeness, or dry humour
+Selection rules:
+  - Each selected purpose must imply a DIFFERENT trajectory
+    (inward / outward / relational — no two the same)
+  - At least one must create forward pull — something unresolved or imminent
+  - No two beats should feel like they belong to the same kind of story
+  - If no places confirmed in bible: avoid THRESHOLD (implies a specific space)
+  - If no characters confirmed in bible: avoid VOICE unless narrator speaks alone
+  - Do NOT select a purpose that references or orbits a thread in the bible
 
-Examples of the right register:
-  'A name surfaces, half-remembered'
-  'Something nearby has shifted'
-  'An old feeling returns without warning'
-  'A sound you can't quite place'
-  'Your hand moves before you decide to'`;
+── STEP 2: GENERATE ONE BEAT PER SELECTED PURPOSE ─────────────────────────
+
+Before writing, identify: what did the recent_story most recently establish?
+  What happened? What did the narrator do or notice? What arrived?
+  Each beat must accept this and build directly from it — yes, and.
+
+Yes-And rule: do not generate a generic example of the purpose.
+  Generate the version of that purpose specific to THIS story.
+
+  e.g. recent story: "my body moved of its own accord"
+       MEMORY   → not 'a childhood memory stirs'
+                → 'the last time your body did this without asking'
+       SENSATION → not 'a sound you can't quite place'
+                → 'what your hands feel as they move without you'
+       INTRUSION → not 'something nearby shifts'
+                → 'something outside notices you moving'
+
+  e.g. recent story: "I spoke my brother's name into the mist"
+       PAUSE     → not 'you stop and listen'
+                → 'the mist does not carry the name back'
+       PERIPHERAL → not 'something catches your eye'
+                 → 'a shape at the edge of the path that is not your brother'
+
+Grounding rule: every beat must imply at least one concrete story element:
+  WHO  — a narrator perspective or sensibility
+  WHAT — a specific action or event (not a vague sensation)
+  WHERE — a recognisable space or direction
+
+A beat that is pure atmospheric sensation with no WHO, WHAT, or WHERE fails.
+  FAIL: 'a chill brushes your skin' (pure sensation, implies nothing)
+  PASS: 'something cold touches your wrist' (WHAT — a specific event)
+  PASS: 'your hand finds the wall' (WHAT + WHERE implied)
+
+Write exactly three beats — one per selected purpose.
+Each beat: ${BEAT_WORD_MIN}–${BEAT_WORD_MAX} words, specific enough to follow immediately.
+
+Spatial rule: if no places confirmed, keep beats sensation-only — no named
+  rooms, buildings, or locations.
+Character rule: do NOT assume a character is present unless the bible confirms one.
+
+Kid-friendly wording:
+  - Prefer concrete actions over introspective abstractions.
+  - Use words an 11–12 year old would use in conversation.
+`;
 
 // ---- Continue ----
 
 const BEAT_BOT_CONTINUE = `
 
-Beats should be immediate, in-world continuations grounded in the scene and characters.
+The next beats should be immediate, in-world continuations grounded in the
+scene and characters.
 
-Before generating, infer 1–2 spaces immediately implied by confirmed places in the bible.
-Use these as the spatial boundary — beats should stay within or just beyond them.
+── STEP 1: SELECT THREE PURPOSES ───────────────────────────────────────────
 
-Vary tone across the three beats:
-  - one lighter, optimistic, or comforting
-  - one neutral, practical, or curious
-  - one matching the current tone of the story bible
+Before writing any beats, select three purposes from this menu.
+Choose the three most narratively useful given the current story state.
 
-Vary resolution across the three beats:
-  - one that directly answers the primary_thread
-  - one that introduces or deepens a different thread
-  - one that does not engage any thread
+  ANSWER     — directly resolves or addresses the primary_thread
+  DEEPEN     — complicates or extends a secondary thread
+  NEW        — introduces a direction or question not yet in the story
+  PAUSE      — interrupts current momentum; narrator stops, listens, notices
+  PERIPHERAL — something unrelated to any thread surfaces in the environment
+  INTERIOR   — a thought, memory, or feeling surfaces in the narrator
+  ACTION     — a physical action that moves the body, not the plot
 
-Vary action across the three beats:
-  - one direct continuation of the last sentence
-  - one indirect or oblique continuation
-  - one that opens a new direction entirely
+Selection rules:
+  - Include at most ONE ANSWER beat per turn
+  - Never select the same purpose twice
+  - If only one thread exists: include at most one ANSWER; choose the other
+    two from PAUSE, PERIPHERAL, INTERIOR, or ACTION
+  - If no threads exist: do not select ANSWER or DEEPEN; choose from
+    NEW, PAUSE, PERIPHERAL, INTERIOR, ACTION
+  - If narrative_position > 0.7: weight toward ANSWER and PAUSE over NEW
+  - Vary emotional register across the three — one lighter or curious,
+    one matching the story's current tone, one carrying tension or
+    a different emotional weight
 
-Avoid vague or ambiguous options unless the story has already gone that way.`;
+── STEP 2: GENERATE ONE BEAT PER SELECTED PURPOSE ─────────────────────────
+
+Before writing, identify: what did the recent_story most recently establish?
+  What happened? What did the narrator do or notice? What arrived?
+  Each beat must accept this and build directly from it — yes, and.
+
+Yes-And rule: do not generate a generic example of the purpose.
+  Generate the version of that purpose specific to THIS story.
+
+  e.g. recent story: "my body moved of its own accord"
+       INTERIOR  → not 'a thought surfaces'
+                → 'the part of you that did not decide to move'
+       PAUSE     → not 'you stop and listen'
+                → 'you wait to see if your body moves again'
+       ACTION    → not 'you reach for something'
+                → 'you try to hold your own hand still'
+
+  e.g. recent story: "the cat asked if I had any food"
+       ANSWER    → not 'address the cat'
+                → 'tell the cat what you can actually make'
+       PERIPHERAL → not 'something catches your eye'
+                 → 'notice what the cat is sitting on'
+       INTERIOR  → not 'a feeling surfaces'
+                -> 'reckon with the fact that you are talking to a cat'
+
+Write exactly three beats — one per selected purpose.
+Ground each beat in the confirmed scene, characters, and objects from the bible.
+
+Each beat: ${BEAT_WORD_MIN}–${BEAT_WORD_MAX} words, specific enough to follow immediately.
+
+Before generating, infer 1–2 spaces immediately implied by confirmed places
+in the bible. Keep beats within or just beyond that spatial boundary.`;
 
 // ---- Ending ----
 
