@@ -15,3 +15,9 @@ Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-
 ### Domain docs
 
 Single-context: `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
+## Git workflow
+
+- `main` is the live app: cPanel deploys it, and it must keep working while Narinav is rebuilt. Never commit to `main` directly.
+- Do each piece of work (one ticket, one fix) on its own branch from `main`, and merge it through a pull request.
+- Keep rebuild work off `main` until it is ready to replace the current app.
