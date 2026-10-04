@@ -1,6 +1,6 @@
 # Narinav
 
-A storytelling game for kids: the player builds a story one sentence at a time with Claude.
+A story game where the player directs and Claude documents what happens and offers possibilities.
 
 ## Language
 
