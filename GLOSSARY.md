@@ -17,3 +17,7 @@ _Avoid_: Choice, option, prompt
 **Artifact**:
 The record of the story the player keeps at the end of play.
 _Avoid_: Chronicle, journal, transcript
+
+**Story bible**:
+The game's running record of a story (who, where, what has happened) that lets it continue across sittings.
+_Avoid_: Memory, save file, notes
