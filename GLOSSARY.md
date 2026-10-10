@@ -18,6 +18,10 @@ _Avoid_: Choice, option, prompt
 The record of the story the player keeps at the end of play. The player has a say in what goes into it.
 _Avoid_: Chronicle, journal, transcript
 
+**Anchor**:
+A loose story event the player picks that the story may build towards, such as "something breaks". Optional: it can be swapped, dropped or never reached.
+_Avoid_: Goal, milestone, plot point, beat
+
 **Story bible**:
 The complete running record of the story's people, places, threads and events, kept so the story stays consistent. Not what the player keeps; that is the Artifact.
 _Avoid_: Notes, memory, context, log
