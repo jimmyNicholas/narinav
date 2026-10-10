@@ -15,5 +15,9 @@ One of the three possible next moves Claude offers the player each turn.
 _Avoid_: Choice, option, prompt
 
 **Artifact**:
-The record of the story the player keeps at the end of play.
+The record of the story the player keeps at the end of play. The player has a say in what goes into it.
 _Avoid_: Chronicle, journal, transcript
+
+**Story bible**:
+The complete running record of the story's people, places, threads and events, kept so the story stays consistent. Not what the player keeps; that is the Artifact.
+_Avoid_: Notes, memory, context, log
